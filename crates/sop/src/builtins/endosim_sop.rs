@@ -3,9 +3,10 @@
 //! simulation at frame `$F`. Frame 1 = the scene's start pose; frame N = N-1 steps of 1/fps later. The node steps lazily and
 //! caches every simulated pose, so scrubbing forwards advances the sim and scrubbing back replays the cache; a changed file / fps
 //! restarts. Param `frame`: 0 = follow the timeline `$F` (`ctx.time * ctx.fps + 1`), > 0 = fixed 1-based frame.
-//! No behaviours / muscles: characters fall and slump (see STATUS.md section h44).
+//! Param `behaviours` (default 1): 1 = active ragdoll (`endo_sim::behaviour`: the scene's `Bob2: CatchFall` joint drives + its `<ForceEvent>`
+//! pushes), 0 = the passive ragdoll of h44 (characters fall and slump). Behaviours without a controller are ignored (NMB.md).
 use crate::SopNode;
-use endo_sim::{CharPose, Sim};
+use endo_sim::{CharPose, Sim, SimOptions};
 use hexe_geo::endorphin::{Document, Scene};
 use hexe_geo::{AttrClass, AttrData, Detail};
 use hexe_graph::{CookCtx, CookError, InputSpec, Node, ParamSpec, ParamValue};
@@ -20,6 +21,9 @@ pub fn spec() -> Vec<ParamSpec> {
         ParamSpec::new("frame", ParamValue::I(0))
             .label("Frame Override (0 = follow timeline $F; else 1-based sim frame)")
             .range(0.0, MAX_FRAME as f32),
+        ParamSpec::new("behaviours", ParamValue::I(1))
+            .label("Behaviours (1 = active ragdoll: scene behaviours + force events, 0 = passive ragdoll)")
+            .range(0.0, 1.0),
     ]
 }
 
@@ -27,7 +31,7 @@ pub fn new() -> Box<SopNode> {
     Box::new(EndoSim { specs: spec(), state: Mutex::new(None) })
 }
 
-type FileKey = (String, Option<SystemTime>, u64, u32);
+type FileKey = (String, Option<SystemTime>, u64, u32, bool);
 
 /// Everything the node keeps between cooks: the scene, the live sim and the pose of every frame simulated so far.
 struct State {
@@ -92,11 +96,12 @@ impl Node<Detail> for EndoSim {
         let want =
             if fixed > 0 { fixed } else { ((time * ctx.fps).round() as i64 + 1).clamp(1, i64::from(MAX_FRAME)) as i32 };
         let meta = std::fs::metadata(&path).map_err(|e| CookError::Failed(format!("{path}: {e}")))?;
-        let key: FileKey = (path.clone(), meta.modified().ok(), meta.len(), ctx.fps.to_bits());
+        let active = ctx.params.int("behaviours").unwrap_or(1) != 0;
+        let key: FileKey = (path.clone(), meta.modified().ok(), meta.len(), ctx.fps.to_bits(), active);
         let mut slot = self.state.lock().map_err(|_| CookError::Failed("endosim state poisoned".into()))?;
         if slot.as_ref().is_none_or(|s| s.key != key) {
             let scene = load_scene(&path)?;
-            let sim = Sim::from_scene(&scene);
+            let sim = Sim::from_scene_with(&scene, SimOptions { behaviours: active, forces: active });
             let poses = vec![sim.pose()];
             *slot = Some(State { key, scene: Arc::new(scene), sim, poses, last: None });
         }
@@ -169,5 +174,31 @@ mod tests {
         assert!(y1 - y30 > 0.5 && y30.is_finite() && y90.is_finite(), "collapsed by f30: {y1} -> {y30} -> {y90}");
         let y30_again = root_y(&mut g, 30);
         assert_eq!(y30.to_bits(), y30_again.to_bits(), "scrub back replays the cache");
+    }
+
+    fn catch_fall() -> Option<PathBuf> {
+        let f = balcony()?.parent()?.parent()?.join("Behaviour Scenes/Catch fall2.0.ens");
+        f.is_file().then_some(f)
+    }
+
+    /// file -> endosim over Catch fall2.0: `behaviours` 1 (default) drives the arms/head, 0 is the passive ragdoll; both deterministic.
+    #[test]
+    fn behaviours_param_switches_the_active_ragdoll() {
+        let Some(f) = catch_fall() else { return };
+        let head_y = |param: &str| {
+            let g = format!(
+                r#"{{"nodes":[{{"name":"f","type":"file","params":{{"file":{:?}}}}},{{"name":"s","type":"endosim","params":{{{param}}}}}],"edges":[["f",0,"s",0]],"display":"s"}}"#,
+                f.to_string_lossy()
+            );
+            let (mut g, out) = load_scene(&g).expect("loads");
+            g.set_fps(30.0);
+            let d = g.cook(out, 59.0 / 30.0).expect("cooks"); // frame 60
+            point(&d, "UpperNeckJoint", "character01").expect("head point")[1]
+        };
+        let (def, on, off) = (head_y(""), head_y(r#""behaviours":1"#), head_y(r#""behaviours":0"#));
+        eprintln!("head y @F60: default {def} on {on} off {off}");
+        assert_eq!(def.to_bits(), on.to_bits(), "default = 1");
+        assert!(on - off > 0.05, "active ragdoll keeps the head higher: {on} vs {off}");
+        assert_eq!(off.to_bits(), head_y(r#""behaviours":0"#).to_bits(), "deterministic");
     }
 }

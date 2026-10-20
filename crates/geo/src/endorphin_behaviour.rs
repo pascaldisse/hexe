@@ -1,6 +1,8 @@
 //! Decoded part of Endorphin behaviours (h46, `oracle/endorphin/NMB.md`): the PLAINTEXT layers only.
+//!
 //! * `.nmb` parameter interface: root `<ry><wx sv kg ja de gu>` (the network blobs `lo lt vw sd sb` are NOT decoded).
 //! * scene instances: `<SecondaryBehaviour behaviourName ...><Parameters><Variable fk kg ja de>` and `<ForceEvent>`.
+//!
 //! Clean-room from data: tag/attribute roles were inferred by correlating the 47 `.nmb` with the 135 scene instances.
 use crate::endorphin::{Node, Scene, Xf};
 

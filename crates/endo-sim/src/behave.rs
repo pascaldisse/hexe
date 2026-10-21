@@ -179,6 +179,9 @@ struct Ctl {
     poses: Vec<PoseTarget>,
     /// `<AnimationEvent>` clips, pre-sampled per ens frame.
     tracks: Vec<Track>,
+    /// The scene timeline (`<Animation>` channels of this character), pre-sampled per ens frame: what Endorphin plays
+    /// kinematically on a character that is not a full-physics ragdoll yet (imported cars / props / mocap actors).
+    timeline: Option<Track>,
     /// Frame this character turns into a full-physics ragdoll (`None` = dynamic from the start, `inf` = never).
     switch: Option<f32>,
     /// Bodies are currently kinematic (driven by the clip).
@@ -413,7 +416,7 @@ impl Ctl {
             joint_of.push(i);
             jcs.push(jc);
         }
-        if jcs.len() < 2 {
+        if jcs.is_empty() {
             return None;
         }
         let pos_of =
@@ -535,6 +538,24 @@ impl Ctl {
                 Track { start: e.start as f32, end: e.end as f32, active: e.active, worlds, rels }
             })
             .collect();
+        // the scene's own timeline for this character: only when something is keyed past its first key
+        let own = || scene.channels.iter().filter(|ch| ch.name.starts_with(c.name.as_str()));
+        let timeline = own().any(|ch| ch.keys.len() > 1).then(|| {
+            let last = own().filter_map(|ch| ch.keys.last()?.first().copied()).fold(0.0f32, f32::max);
+            let n = (last * fps.max(1.0)).ceil().clamp(1.0, 1.0e5) as usize + 1;
+            let (mut worlds, mut rels) = (Vec::with_capacity(n), Vec::with_capacity(n));
+            for f in 0..n {
+                let locals = scene.posed_locals(c, f as f32 / fps.max(1.0));
+                let w: Vec<crate::Xf> = c.world_of(&locals).iter().map(|x| c.xf.mul(x)).collect();
+                worlds.push(
+                    (0..jcs.len())
+                        .map(|k| w.get(joint_of.get(k).copied().unwrap_or(0)).copied().unwrap_or_default())
+                        .collect(),
+                );
+                rels.push(rels_of(&locals));
+            }
+            Track { start: 0.0, end: (n - 1) as f32, active: false, worlds, rels }
+        });
         // `<IncarnationEvent>`: the frame this character becomes a full-physics ragdoll (None = dynamic from frame 0)
         let inc: Vec<_> = scene.incarnations().into_iter().filter(|i| i.character == c.name).collect();
         let switch = match inc.first() {
@@ -551,6 +572,7 @@ impl Ctl {
             ignored,
             poses,
             tracks,
+            timeline,
             switch,
             kinematic: false,
             init: false,
@@ -661,6 +683,10 @@ impl Ctl {
     fn track_at(&self, fr: f32) -> Option<(&Track, usize)> {
         self.tracks.iter().filter_map(|t| t.at(fr).map(|k| (t, k))).next_back()
     }
+    /// What poses the bodies while the character is kinematic: an `AnimationEvent` clip, else the scene timeline.
+    fn kin_at(&self, fr: f32) -> Option<(&Track, usize)> {
+        self.track_at(fr).or_else(|| self.timeline.as_ref().and_then(|t| t.at(fr).map(|k| (t, k))))
+    }
     /// Servo target of jc `k` at `fr`: active clip pose > authored active pose > the scene start pose.
     fn target_rel(&self, k: usize, fr: f32) -> Quat {
         if let Some((t, i)) = self.track_at(fr)
@@ -693,10 +719,10 @@ impl Ctl {
             if self.kinematic {
                 self.kinematic = false;
                 // hand over to the solver with the clip's own velocity (finite difference over one substep)
-                let prev = self.track_at((fr - dt * self.fps).max(0.0));
+                let prev = self.kin_at((fr - dt * self.fps).max(0.0));
                 for (k, j) in self.jcs.iter().enumerate() {
                     let (now, before) = (
-                        self.track_at(fr).and_then(|(t, i)| t.worlds.get(i).and_then(|v| v.get(k)).copied()),
+                        self.kin_at(fr).and_then(|(t, i)| t.worlds.get(i).and_then(|v| v.get(k)).copied()),
                         prev.and_then(|(t, i)| t.worlds.get(i).and_then(|v| v.get(k)).copied()),
                     );
                     if let Some(b) = w.bodies.get_mut(j.body) {
@@ -712,7 +738,7 @@ impl Ctl {
             }
             return false;
         }
-        let Some((t, i)) = self.track_at(fr) else { return true };
+        let Some((t, i)) = self.kin_at(fr) else { return true };
         let poses: Vec<Option<crate::Xf>> = (0..self.jcs.len()).map(|k| t.worlds.get(i).and_then(|v| v.get(k)).copied()).collect();
         for (k, j) in self.jcs.iter().enumerate() {
             let Some(Some(x)) = poses.get(k) else { continue };

@@ -216,9 +216,7 @@ mod tests {
             assert!(list_in(&root, &bad).is_err(), "list {bad:?} must be rejected");
             assert!(mkdir_in(&root, &bad).is_err(), "mkdir {bad:?} must be rejected");
         }
-        assert!(list_in(&root, &dir_string(&base.join("secret")))
-            .unwrap_err()
-            .contains("outside the project root"));
+        assert!(list_in(&root, &dir_string(&base.join("secret"))).unwrap_err().contains("outside the project root"));
 
         // a symlink inside the root pointing out of it is still out
         #[cfg(unix)]

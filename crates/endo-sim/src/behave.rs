@@ -342,7 +342,7 @@ impl Behave {
             .unwrap_or(DEFAULT_FRAME_RATE);
         let mut chars = Vec::new();
         for (c, rig) in scene.characters.iter().zip(rigs) {
-            if let Some(mut ctl) = Ctl::build(scene, c, rig, world) {
+            if let Some(mut ctl) = Ctl::build(scene, c, rig, world, fps) {
                 ctl.fps = fps;
                 chars.push(ctl);
             }
@@ -373,7 +373,7 @@ impl Behave {
 }
 
 impl Ctl {
-    fn build(scene: &Scene, c: &Character, rig: &Rig, world: &PhysicsWorld) -> Option<Ctl> {
+    fn build(scene: &Scene, c: &Character, rig: &Rig, world: &PhysicsWorld, fps: f32) -> Option<Ctl> {
         let rig_rest: Vec<crate::Xf> = c.world_of(&c.rest_locals()).iter().map(|x| c.xf.mul(x)).collect();
         let mut index: HashMap<usize, usize> = HashMap::new();
         let mut jcs: Vec<Jc> = Vec::new();
@@ -512,9 +512,14 @@ impl Ctl {
             .map(|e| {
                 let dt = key_spacing(&e.channels);
                 let n = (e.end - e.start).max(0) as usize + 1;
+                // clip time of window frame f = frameOffset (in clip frames) + real time since the event start.
+                // `frameOffset` 255 is the file's "no offset" sentinel (it would run the window past the last key).
+                let last = e.channels.iter().filter_map(|c| c.keys.last()?.first().copied()).fold(0.0f32, f32::max);
+                let off = e.frame_offset as f32 * dt;
+                let off = if off + n as f32 / fps.max(1.0) <= last + dt { off } else { 0.0 };
                 let (mut worlds, mut rels) = (Vec::with_capacity(n), Vec::with_capacity(n));
                 for f in 0..n {
-                    let t = (e.frame_offset as f32 + f as f32) * dt;
+                    let t = off + f as f32 / fps.max(1.0);
                     let locals = c.locals_at(&base, &e.channels, t);
                     worlds.push(
                         (0..jcs.len())

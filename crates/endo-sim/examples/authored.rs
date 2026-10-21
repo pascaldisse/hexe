@@ -65,7 +65,13 @@ fn main() {
         .iter()
         .filter(|(t, _)| {
             let l = t.to_ascii_lowercase();
-            l.contains("anim") || l.contains("pose") || l.contains("channel") || l.contains("event") || l.contains("key")
+            l.contains("anim")
+                || l.contains("pose")
+                || l.contains("channel")
+                || l.contains("event")
+                || l.contains("key")
+                || l.contains("constraint")
+                || l.contains("rig")
         })
         .map(|(t, n)| format!("{t}={n}"))
         .collect();

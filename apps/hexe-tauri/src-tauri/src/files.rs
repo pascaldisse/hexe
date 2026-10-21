@@ -1,7 +1,10 @@
 //! File browser backend (File > Open dialog, `ui/src/filewin.ts`): directory listing, standard places, new folder.
 //! std only; paths travel as `/`-separated strings (Windows accepts them), directories end in `/`.
+//!
+//! SANDBOX: every path the UI sends is resolved inside the project root (`HEXE_PROJECT_ROOT`, else the process
+//! working directory). `..`, absolute paths outside the root and symlinks that leave it are errors, not listings.
 use serde::Serialize;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
 /// Listing cap: a hostile / huge directory cannot stall the UI with millions of rows.
@@ -36,6 +39,35 @@ pub fn dir_string(p: &Path) -> String {
     s
 }
 
+/// Project root: `HEXE_PROJECT_ROOT`, else the working directory (canonical when it resolves).
+pub fn root() -> PathBuf {
+    let p = std::env::var_os("HEXE_PROJECT_ROOT")
+        .map(PathBuf::from)
+        .filter(|p| !p.as_os_str().is_empty())
+        .or_else(|| std::env::current_dir().ok())
+        .unwrap_or_else(|| PathBuf::from("/"));
+    p.canonicalize().unwrap_or(p)
+}
+
+/// `dir` as a path inside `root`, or an error. Empty / `..` / absolute-outside / symlink-out are all rejected.
+pub fn under(root: &Path, dir: &str) -> Result<PathBuf, String> {
+    let raw = dir.replace('\\', "/");
+    if raw.trim().is_empty() {
+        return Err("empty path".to_string());
+    }
+    let p = Path::new(&raw);
+    if p.components().any(|c| c == Component::ParentDir) {
+        return Err(format!("{dir}: `..` is not allowed"));
+    }
+    let joined = if p.is_absolute() { p.to_path_buf() } else { root.join(p) };
+    let real = joined.canonicalize().unwrap_or(joined);
+    let base = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    if !real.starts_with(&base) {
+        return Err(format!("{dir}: outside the project root {}", base.display()));
+    }
+    Ok(real)
+}
+
 fn home() -> PathBuf {
     std::env::var_os("USERPROFILE")
         .or_else(|| std::env::var_os("HOME"))
@@ -56,9 +88,15 @@ fn hidden(name: &str, _meta: &std::fs::Metadata) -> bool {
     name.starts_with('.')
 }
 
-/// Entries of `dir` (hidden / system ones skipped, like Houdini's browser), unsorted, at most `MAX_ENTRIES`.
+/// Entries of `dir` inside the project root (`under`), hidden / system ones skipped, at most `MAX_ENTRIES`.
 pub fn list(dir: &str) -> Result<Vec<Entry>, String> {
-    let rd = std::fs::read_dir(dir).map_err(|e| format!("{dir}: {e}"))?;
+    list_in(&root(), dir)
+}
+
+/// `list` against an explicit root (the tests' entry point).
+pub fn list_in(root: &Path, dir: &str) -> Result<Vec<Entry>, String> {
+    let path = under(root, dir)?;
+    let rd = std::fs::read_dir(&path).map_err(|e| format!("{dir}: {e}"))?;
     let mut out = Vec::new();
     for ent in rd.flatten() {
         if out.len() >= MAX_ENTRIES {
@@ -79,24 +117,36 @@ pub fn list(dir: &str) -> Result<Vec<Entry>, String> {
 }
 
 pub fn places() -> Places {
+    places_in(&root())
+}
+
+/// Places clamped to `root`: anything outside it (home, Desktop, temp, drive roots) collapses to the root itself.
+pub fn places_in(root: &Path) -> Places {
+    let base = dir_string(root);
+    let keep = |p: PathBuf| match under(root, &dir_string(&p)) {
+        Ok(real) if real.is_dir() => dir_string(&real),
+        _ => base.clone(),
+    };
     let h = home();
-    #[cfg(windows)]
-    let roots = (b'A'..=b'Z').map(|c| format!("{}:/", c as char)).filter(|r| Path::new(r).is_dir()).collect();
-    #[cfg(not(windows))]
-    let roots = vec!["/".to_string()];
     Places {
-        home: dir_string(&h),
-        desktop: dir_string(&h.join("Desktop")),
-        temp: dir_string(&std::env::temp_dir()),
-        roots,
+        home: keep(h.clone()),
+        desktop: keep(h.join("Desktop")),
+        temp: keep(std::env::temp_dir()),
+        roots: vec![base],
     }
 }
 
 /// New Folder: `dir/New Folder`, or `New Folder 2`, ... when taken. Returns the created name.
 pub fn mkdir(dir: &str) -> Result<String, String> {
+    mkdir_in(&root(), dir)
+}
+
+/// `mkdir` against an explicit root (the tests' entry point).
+pub fn mkdir_in(root: &Path, dir: &str) -> Result<String, String> {
+    let base = under(root, dir)?;
     for i in 1..1000 {
         let name = if i == 1 { "New Folder".to_string() } else { format!("New Folder {i}") };
-        let p = Path::new(dir).join(&name);
+        let p = base.join(&name);
         if p.exists() {
             continue;
         }
@@ -109,24 +159,85 @@ pub fn mkdir(dir: &str) -> Result<String, String> {
 mod tests {
     use super::*;
 
+    /// Unique scratch root per test (temp dir; canonical so macOS `/var` -> `/private/var` does not fail prefix checks).
+    fn scratch(tag: &str) -> PathBuf {
+        let p = std::env::temp_dir().join(format!("hexe-files-{}-{tag}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&p);
+        std::fs::create_dir_all(&p).expect("scratch");
+        p.canonicalize().unwrap_or(p)
+    }
+
     #[test]
     fn list_mkdir_round_trip_and_hostile_dirs() -> Result<(), String> {
-        let base = std::env::temp_dir().join(format!("hexe-files-{}", std::process::id()));
-        std::fs::create_dir_all(&base).map_err(|e| e.to_string())?;
+        let base = scratch("roundtrip");
         std::fs::write(base.join("a.hip"), b"12345").map_err(|e| e.to_string())?;
         std::fs::create_dir_all(base.join(".hidden")).map_err(|e| e.to_string())?;
         let b = dir_string(&base);
-        assert_eq!(mkdir(&b)?, "New Folder");
-        assert_eq!(mkdir(&b)?, "New Folder 2");
-        let mut l = list(&b)?;
+        assert_eq!(mkdir_in(&base, &b)?, "New Folder");
+        assert_eq!(mkdir_in(&base, &b)?, "New Folder 2");
+        let mut l = list_in(&base, &b)?;
         l.sort_by(|x, y| x.name.cmp(&y.name));
         assert_eq!(
             l.iter().map(|e| (e.name.as_str(), e.dir, e.size)).collect::<Vec<_>>(),
             [("New Folder", true, None), ("New Folder 2", true, None), ("a.hip", false, Some(5))]
         );
         assert!(l.iter().all(|e| e.modified.is_some()));
-        assert!(list(&format!("{b}does-not-exist/")).is_err());
-        assert!(list("").is_err());
+        assert!(list_in(&base, &format!("{b}does-not-exist/")).is_err());
+        assert!(list_in(&base, "").is_err());
+        // relative paths are resolved against the root
+        assert_eq!(list_in(&base, "New Folder")?.len(), 0);
+        std::fs::remove_dir_all(&base).map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    /// SANDBOX: `..`, absolute paths outside the root and symlinks out of it are errors; inside stays allowed.
+    #[test]
+    fn paths_outside_the_project_root_are_rejected() -> Result<(), String> {
+        let base = scratch("sandbox");
+        let root = base.join("proj");
+        std::fs::create_dir_all(root.join("sub")).map_err(|e| e.to_string())?;
+        std::fs::create_dir_all(base.join("secret")).map_err(|e| e.to_string())?;
+        std::fs::write(base.join("secret/key.txt"), b"x").map_err(|e| e.to_string())?;
+
+        assert!(under(&root, "sub").is_ok());
+        assert!(under(&root, &dir_string(&root.join("sub"))).is_ok());
+        for bad in [
+            "..".to_string(),
+            "../secret".to_string(),
+            "sub/../../secret".to_string(),
+            "sub\\..\\..\\secret".to_string(),
+            dir_string(&base.join("secret")),
+            "/".to_string(),
+            "/etc".to_string(),
+            String::new(),
+            "   ".to_string(),
+        ] {
+            assert!(under(&root, &bad).is_err(), "{bad:?} must be rejected");
+            assert!(list_in(&root, &bad).is_err(), "list {bad:?} must be rejected");
+            assert!(mkdir_in(&root, &bad).is_err(), "mkdir {bad:?} must be rejected");
+        }
+        assert!(list_in(&root, &dir_string(&base.join("secret")))
+            .unwrap_err()
+            .contains("outside the project root"));
+
+        // a symlink inside the root pointing out of it is still out
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(base.join("secret"), root.join("escape")).map_err(|e| e.to_string())?;
+            assert!(under(&root, "escape").is_err());
+            assert!(list_in(&root, "escape").is_err());
+        }
+
+        // mkdir only writes inside the root
+        assert_eq!(mkdir_in(&root, "sub")?, "New Folder");
+        assert!(root.join("sub/New Folder").is_dir());
+        assert!(!base.join("secret/New Folder").exists());
+
+        // places collapse to the root when home / temp lie outside it
+        let p = places_in(&root);
+        let want = dir_string(&root);
+        assert_eq!((p.home, p.desktop, p.temp, p.roots), (want.clone(), want.clone(), want.clone(), vec![want]));
+
         std::fs::remove_dir_all(&base).map_err(|e| e.to_string())?;
         Ok(())
     }
@@ -137,5 +248,7 @@ mod tests {
         assert_eq!(dir_string(Path::new("/tmp/")), "/tmp/");
         let p = places();
         assert!(p.home.ends_with('/') && p.temp.ends_with('/') && !p.roots.is_empty());
+        let base = dir_string(&root());
+        assert!([&p.home, &p.desktop, &p.temp].into_iter().chain(&p.roots).all(|x| x.starts_with(&base)));
     }
 }

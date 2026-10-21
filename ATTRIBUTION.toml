@@ -268,3 +268,163 @@ author = "ghoul-sonnet (h46)"
 source = "hexe-tauri --render over file->endosim->blast; Endorphin sample scene geometry (third-party sample data, rights unclear: proof render only, do not redistribute the scene files)"
 licence = "MIT"
 sha256 = "c2f4b4ab19b00d478d1b82e2d0c93a3bbfc665f17debda1c8d6af5ecd363f915"
+
+[[asset]]
+path = "proof/h47/Balcony_play_F1.png"
+title = "h47 endosim play-path render (Balcony_play_F1)"
+author = "ghoul-opus (h47)"
+source = "hexe-tauri --render over file->endosim(behaviours=2)->blast; Endorphin sample scene geometry (third-party sample data, rights unclear: proof render only, do not redistribute the scene files)"
+licence = "MIT"
+sha256 = "cc4b60ee30a98931c961d1b1247bae7cc57e47f544ed539da6ee4626236db048"
+
+[[asset]]
+path = "proof/h47/Balcony_play_F30.png"
+title = "h47 endosim play-path render (Balcony_play_F30)"
+author = "ghoul-opus (h47)"
+source = "hexe-tauri --render over file->endosim(behaviours=2)->blast; Endorphin sample scene geometry (third-party sample data, rights unclear: proof render only, do not redistribute the scene files)"
+licence = "MIT"
+sha256 = "4a8023f2851a8b2abcce0cc1cdc2fbd25bddf0cbfdfad9d2aac4eeddf115441f"
+
+[[asset]]
+path = "proof/h47/Balcony_play_F300.png"
+title = "h47 endosim play-path render (Balcony_play_F300)"
+author = "ghoul-opus (h47)"
+source = "hexe-tauri --render over file->endosim(behaviours=2)->blast; Endorphin sample scene geometry (third-party sample data, rights unclear: proof render only, do not redistribute the scene files)"
+licence = "MIT"
+sha256 = "fafca95bb663bc5526904278d875d2d73eedf83aedb4e06c22c5770a0230fc80"
+
+[[asset]]
+path = "proof/h47/Balcony_play_F60.png"
+title = "h47 endosim play-path render (Balcony_play_F60)"
+author = "ghoul-opus (h47)"
+source = "hexe-tauri --render over file->endosim(behaviours=2)->blast; Endorphin sample scene geometry (third-party sample data, rights unclear: proof render only, do not redistribute the scene files)"
+licence = "MIT"
+sha256 = "1ff05439b071c0208fa42d32b751223b6d26e0e8f99a735c674535ba26658052"
+
+[[asset]]
+path = "proof/h47/Balcony_play_F90.png"
+title = "h47 endosim play-path render (Balcony_play_F90)"
+author = "ghoul-opus (h47)"
+source = "hexe-tauri --render over file->endosim(behaviours=2)->blast; Endorphin sample scene geometry (third-party sample data, rights unclear: proof render only, do not redistribute the scene files)"
+licence = "MIT"
+sha256 = "6ef867acffd843636432d65d3f89f9990c11ae343cd6d4d87372831f19075bea"
+
+[[asset]]
+path = "proof/h47/Car_Hit_play_F1.png"
+title = "h47 endosim play-path render (Car_Hit_play_F1)"
+author = "ghoul-opus (h47)"
+source = "hexe-tauri --render over file->endosim(behaviours=2)->blast; Endorphin sample scene geometry (third-party sample data, rights unclear: proof render only, do not redistribute the scene files)"
+licence = "MIT"
+sha256 = "219f1926e3b8175ede55a8a21d35cc7da9f7c60b5e835ad56bd98acd605c7968"
+
+[[asset]]
+path = "proof/h47/Car_Hit_play_F30.png"
+title = "h47 endosim play-path render (Car_Hit_play_F30)"
+author = "ghoul-opus (h47)"
+source = "hexe-tauri --render over file->endosim(behaviours=2)->blast; Endorphin sample scene geometry (third-party sample data, rights unclear: proof render only, do not redistribute the scene files)"
+licence = "MIT"
+sha256 = "0ffc1b2507cf5cbd96f1af49a977ddda5661c86420a77e7e665ecc8417838134"
+
+[[asset]]
+path = "proof/h47/Car_Hit_play_F300.png"
+title = "h47 endosim play-path render (Car_Hit_play_F300)"
+author = "ghoul-opus (h47)"
+source = "hexe-tauri --render over file->endosim(behaviours=2)->blast; Endorphin sample scene geometry (third-party sample data, rights unclear: proof render only, do not redistribute the scene files)"
+licence = "MIT"
+sha256 = "94262a018fd81b9f173bd84a2acf91913ebf447817de898f7567c7818d06ec7d"
+
+[[asset]]
+path = "proof/h47/Car_Hit_play_F60.png"
+title = "h47 endosim play-path render (Car_Hit_play_F60)"
+author = "ghoul-opus (h47)"
+source = "hexe-tauri --render over file->endosim(behaviours=2)->blast; Endorphin sample scene geometry (third-party sample data, rights unclear: proof render only, do not redistribute the scene files)"
+licence = "MIT"
+sha256 = "02083b1d77e4d15b11a059958c5b2bf63e0f9269bbf4ddc95809e07cfccdcab3"
+
+[[asset]]
+path = "proof/h47/Car_Hit_play_F90.png"
+title = "h47 endosim play-path render (Car_Hit_play_F90)"
+author = "ghoul-opus (h47)"
+source = "hexe-tauri --render over file->endosim(behaviours=2)->blast; Endorphin sample scene geometry (third-party sample data, rights unclear: proof render only, do not redistribute the scene files)"
+licence = "MIT"
+sha256 = "1f9280d7759925c4ddd6d6e82ab6e4e1201f0e4707f014ca8f8ee49946124e44"
+
+[[asset]]
+path = "proof/h47/Gymnast_Rings_play_F1.png"
+title = "h47 endosim play-path render (Gymnast_Rings_play_F1)"
+author = "ghoul-opus (h47)"
+source = "hexe-tauri --render over file->endosim(behaviours=2)->blast; Endorphin sample scene geometry (third-party sample data, rights unclear: proof render only, do not redistribute the scene files)"
+licence = "MIT"
+sha256 = "37bed78ba9678ea1728462a4d4ba8f2b795130419e1ae06b2ba72fdab0497f1d"
+
+[[asset]]
+path = "proof/h47/Gymnast_Rings_play_F30.png"
+title = "h47 endosim play-path render (Gymnast_Rings_play_F30)"
+author = "ghoul-opus (h47)"
+source = "hexe-tauri --render over file->endosim(behaviours=2)->blast; Endorphin sample scene geometry (third-party sample data, rights unclear: proof render only, do not redistribute the scene files)"
+licence = "MIT"
+sha256 = "ac1d1cbaeec46e47c77106d3f2261050b26eeab7c682646b6e8a718f008d2b94"
+
+[[asset]]
+path = "proof/h47/Gymnast_Rings_play_F300.png"
+title = "h47 endosim play-path render (Gymnast_Rings_play_F300)"
+author = "ghoul-opus (h47)"
+source = "hexe-tauri --render over file->endosim(behaviours=2)->blast; Endorphin sample scene geometry (third-party sample data, rights unclear: proof render only, do not redistribute the scene files)"
+licence = "MIT"
+sha256 = "96ba2a6be53f8998768158931caadc7828c68280c372438f0a7ed4804743aab6"
+
+[[asset]]
+path = "proof/h47/Gymnast_Rings_play_F60.png"
+title = "h47 endosim play-path render (Gymnast_Rings_play_F60)"
+author = "ghoul-opus (h47)"
+source = "hexe-tauri --render over file->endosim(behaviours=2)->blast; Endorphin sample scene geometry (third-party sample data, rights unclear: proof render only, do not redistribute the scene files)"
+licence = "MIT"
+sha256 = "92f34657e91a681128132f7f05cbd5251cf83eee0db7fad7537c4c34aef24bf5"
+
+[[asset]]
+path = "proof/h47/Gymnast_Rings_play_F90.png"
+title = "h47 endosim play-path render (Gymnast_Rings_play_F90)"
+author = "ghoul-opus (h47)"
+source = "hexe-tauri --render over file->endosim(behaviours=2)->blast; Endorphin sample scene geometry (third-party sample data, rights unclear: proof render only, do not redistribute the scene files)"
+licence = "MIT"
+sha256 = "32e1a09720046960b489a8eb929f9bc84a5d3463e2ea9463e8240ebcb89a90ab"
+
+[[asset]]
+path = "proof/h47/Sword_Play_play_F1.png"
+title = "h47 endosim play-path render (Sword_Play_play_F1)"
+author = "ghoul-opus (h47)"
+source = "hexe-tauri --render over file->endosim(behaviours=2)->blast; Endorphin sample scene geometry (third-party sample data, rights unclear: proof render only, do not redistribute the scene files)"
+licence = "MIT"
+sha256 = "6fa320557b25a07391506a5fd435466f726fae995915efc744ca42b4f276ef14"
+
+[[asset]]
+path = "proof/h47/Sword_Play_play_F30.png"
+title = "h47 endosim play-path render (Sword_Play_play_F30)"
+author = "ghoul-opus (h47)"
+source = "hexe-tauri --render over file->endosim(behaviours=2)->blast; Endorphin sample scene geometry (third-party sample data, rights unclear: proof render only, do not redistribute the scene files)"
+licence = "MIT"
+sha256 = "c6bd22640a199c8ce672460db0677f4c3138c4d0e8966b23c43389b3aaa45bfb"
+
+[[asset]]
+path = "proof/h47/Sword_Play_play_F300.png"
+title = "h47 endosim play-path render (Sword_Play_play_F300)"
+author = "ghoul-opus (h47)"
+source = "hexe-tauri --render over file->endosim(behaviours=2)->blast; Endorphin sample scene geometry (third-party sample data, rights unclear: proof render only, do not redistribute the scene files)"
+licence = "MIT"
+sha256 = "b4aa39e93397410158a34e85963741bf50b2d98fa33a68b514ad781c70d2ea7f"
+
+[[asset]]
+path = "proof/h47/Sword_Play_play_F60.png"
+title = "h47 endosim play-path render (Sword_Play_play_F60)"
+author = "ghoul-opus (h47)"
+source = "hexe-tauri --render over file->endosim(behaviours=2)->blast; Endorphin sample scene geometry (third-party sample data, rights unclear: proof render only, do not redistribute the scene files)"
+licence = "MIT"
+sha256 = "88ec9c2093139750d57c47d5c4df31fbc420801a6d5f1b3cfd21c84e8611029e"
+
+[[asset]]
+path = "proof/h47/Sword_Play_play_F90.png"
+title = "h47 endosim play-path render (Sword_Play_play_F90)"
+author = "ghoul-opus (h47)"
+source = "hexe-tauri --render over file->endosim(behaviours=2)->blast; Endorphin sample scene geometry (third-party sample data, rights unclear: proof render only, do not redistribute the scene files)"
+licence = "MIT"
+sha256 = "1aa613569f48c8d9a93cc27a9ae06d5f2e280b2f6367a4665961ae1f72901db0"

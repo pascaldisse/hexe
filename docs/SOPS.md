@@ -1271,7 +1271,7 @@ Inputs: scene.
 | param | label | type | default | range / menu |
 |---|---|---|---|---|
 | `frame` | Frame Override (0 = follow timeline $F; else 1-based sim frame) | int | `0` | 0 … 2400 |
-| `behaviours` | Behaviours (1 = active ragdoll: scene behaviours + force events, 0 = passive ragdoll) | int | `1` | 0 … 1 |
+| `behaviours` | Behaviours (0 = passive ragdoll, 1 = CatchFall drives + force events, 2 = play: + pose hold / balance / secondary) | int | `2` | 0 … 2 |
 
 ### enumerate
 

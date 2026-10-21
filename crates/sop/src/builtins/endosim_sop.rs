@@ -142,9 +142,9 @@ mod tests {
         f.is_file().then_some(f)
     }
 
-    fn graph(file: &str) -> String {
+    fn graph(file: &str, param: &str) -> String {
         format!(
-            r#"{{"nodes":[{{"name":"f","type":"file","params":{{"file":{file:?}}}}},{{"name":"s","type":"endosim","params":{{}}}}],"edges":[["f",0,"s",0]],"display":"s"}}"#
+            r#"{{"nodes":[{{"name":"f","type":"file","params":{{"file":{file:?}}}}},{{"name":"s","type":"endosim","params":{{{param}}}}}],"edges":[["f",0,"s",0]],"display":"s"}}"#
         )
     }
 
@@ -161,11 +161,12 @@ mod tests {
         })
     }
 
-    /// file -> endosim over the real Balcony: $F scrubs the simulation (forward, then back = cache replay).
+    /// file -> endosim (`behaviours` 0 = passive ragdoll, the collapse; the default is play since h47) over the real Balcony:
+    /// $F scrubs the simulation (forward, then back = cache replay).
     #[test]
     fn frame_scrubs_the_simulation() {
         let Some(f) = balcony() else { return };
-        let (mut g, out) = load_scene(&graph(&f.to_string_lossy())).expect("loads");
+        let (mut g, out) = load_scene(&graph(&f.to_string_lossy(), r#""behaviours":0"#)).expect("loads");
         g.set_fps(30.0);
         let root_y = |g: &mut hexe_graph::Graph<hexe_geo::Detail>, frame: u32| {
             let d = g.cook(out, (frame as f32 - 1.0) / 30.0).expect("cooks");
@@ -183,7 +184,7 @@ mod tests {
         f.is_file().then_some(f)
     }
 
-    /// file -> endosim over Catch fall2.0: `behaviours` 1 (default) drives the arms/head, 0 is the passive ragdoll; both deterministic.
+    /// file -> endosim over Catch fall2.0: `behaviours` 2 (default = h47 play) and 1 drive the arms/head, 0 is the passive ragdoll; all deterministic.
     #[test]
     fn behaviours_param_switches_the_active_ragdoll() {
         let Some(f) = catch_fall() else { return };
@@ -197,9 +198,10 @@ mod tests {
             let d = g.cook(out, 59.0 / 30.0).expect("cooks"); // frame 60
             point(&d, "UpperNeckJoint", "character01").expect("head point")[1]
         };
-        let (def, on, off) = (head_y(""), head_y(r#""behaviours":1"#), head_y(r#""behaviours":0"#));
-        eprintln!("head y @F60: default {def} on {on} off {off}");
-        assert_eq!(def.to_bits(), on.to_bits(), "default = 1");
+        let (def, play, on, off) =
+            (head_y(""), head_y(r#""behaviours":2"#), head_y(r#""behaviours":1"#), head_y(r#""behaviours":0"#));
+        eprintln!("head y @F60: default {def} play {play} on {on} off {off}");
+        assert_eq!(def.to_bits(), play.to_bits(), "default = 2 (play)");
         assert!(on - off > 0.05, "active ragdoll keeps the head higher: {on} vs {off}");
         assert_eq!(off.to_bits(), head_y(r#""behaviours":0"#).to_bits(), "deterministic");
     }

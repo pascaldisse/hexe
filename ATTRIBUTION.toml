@@ -54,6 +54,14 @@ licence = "MIT"
 sha256 = "4a6711b64905652b7992eaff4618d3bb5e01f9d05425ad96a0021ddb9bda1516"
 
 [[asset]]
+path = "apps/hexe-tauri/src-tauri/icons/icon.ico"
+title = "hexe app icon, Windows .ico (16/24/32/48/64/256 PNG entries)"
+author = "Alec Cromer (PR #1), from the hexe app icon by Nyari (paloptic)"
+source = "re-encoded from apps/hexe-tauri/src-tauri/icons/icon.png (generated blue disc), original work; needed by the Windows Tauri bundle"
+licence = "MIT"
+sha256 = "d809d226eb21bb7eb5d61cbf01f231418bc3c8fdddc3208f6d2374e423594b86"
+
+[[asset]]
 path = "apps/hexe-tauri/proof/endorphin-ui-balance-F1.png"
 title = "endorphin-ui motion proof render"
 author = "Nyari (paloptic)"

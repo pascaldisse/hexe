@@ -4,7 +4,7 @@
 //! * scene instances: `<SecondaryBehaviour behaviourName ...><Parameters><Variable fk kg ja de>` and `<ForceEvent>`.
 //!
 //! Clean-room from data: tag/attribute roles were inferred by correlating the 47 `.nmb` with the 135 scene instances.
-use crate::endorphin::{Node, Scene, Xf};
+use crate::endorphin::{Channel, Node, Scene, Xf};
 
 /// Value type of a parameter (`kg` code).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -204,7 +204,107 @@ impl ForceEvent {
     }
 }
 
+/// `<DesiredPoseEvent>`: an active pose held over a frame window (Endorphin's "active posing").
+/// `strength` is the file's own scale (observed 0.5 .. 12; 1 = the default of the tool).
+#[derive(Clone, Debug, PartialEq)]
+pub struct PoseEvent {
+    pub character: String,
+    pub start: i32,
+    pub end: i32,
+    pub strength: f32,
+    /// Blend-in time (s) of the event (`entryBlendPeriod`).
+    pub blend: f32,
+    /// The authored pose: `joint name -> parent-local matrix` (`<Pose><Relationships>`), empty = hold the start pose.
+    pub pose: Vec<(String, Xf)>,
+}
+
+/// `<AnimationEvent>`: an imported clip played on one character over a frame window; the clip's channels live inside the event.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AnimEvent {
+    pub character: String,
+    pub start: i32,
+    pub end: i32,
+    /// `active` = the clip also drives the simulated character (active animation); `passive` only = kinematic playback.
+    pub active: bool,
+    pub strength: f32,
+    /// `frameOffset`: where in the clip the window starts (frames of the clip's own rate).
+    pub frame_offset: i32,
+    /// Clip channels (`character01.Joints.<joint>.quat`, `character01.root.t{x,y,z}`, ...).
+    pub channels: Vec<Channel>,
+}
+
+/// `<IncarnationEvent>`: the physics level a character switches to at `start` (`NoPhysics`, `FullPhysics`,
+/// `CollisionOnlyWithInertia`, ...).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Incarnation {
+    pub character: String,
+    pub start: i32,
+    pub level: String,
+}
+
+impl Incarnation {
+    /// Simulated with forces (`FullPhysics`); everything else = driven / collision-only.
+    pub fn full_physics(&self) -> bool {
+        self.level.eq_ignore_ascii_case("FullPhysics")
+    }
+}
+
 impl Scene {
+    /// Every `<DesiredPoseEvent>` in file order, with its authored pose.
+    pub fn pose_events(&self) -> Vec<PoseEvent> {
+        self.events("DesiredPoseEvent")
+            .map(|e| {
+                let f = |k: &str| e.attr(k).and_then(|v| v.trim().parse::<f32>().ok());
+                PoseEvent {
+                    character: e.attr("character").unwrap_or("").to_string(),
+                    start: f("startFrameNumber").unwrap_or(0.0) as i32,
+                    end: f("endFrameNumber").unwrap_or(0.0) as i32,
+                    strength: f("strength").unwrap_or(1.0),
+                    blend: e.f32("entryBlendPeriod").unwrap_or(0.0),
+                    pose: e
+                        .child("Pose")
+                        .and_then(|p| p.child("Relationships"))
+                        .map(|r| {
+                            r.kids("Relationship")
+                                .filter_map(|x| Some((x.attr("name")?.to_string(), Xf::from_node(x)?)))
+                                .collect()
+                        })
+                        .unwrap_or_default(),
+                }
+            })
+            .collect()
+    }
+    /// Every enabled `<AnimationEvent>` in file order, with its clip.
+    pub fn anim_events(&self) -> Vec<AnimEvent> {
+        self.events("AnimationEvent")
+            .filter(|e| e.bool("enabled").unwrap_or(true))
+            .map(|e| {
+                let i = |k: &str| e.attr(k).and_then(|v| v.trim().parse::<i32>().ok());
+                AnimEvent {
+                    character: e.attr("character").unwrap_or("").to_string(),
+                    start: i("startFrameNumber").unwrap_or(0),
+                    end: i("endFrameNumber").unwrap_or(0),
+                    active: e.bool("active").unwrap_or(false),
+                    strength: e.f32("strength").unwrap_or(1.0),
+                    frame_offset: i("frameOffset").unwrap_or(0),
+                    channels: e.child("Animation").map(crate::endorphin::channels_of).unwrap_or_default(),
+                }
+            })
+            .collect()
+    }
+    /// Every `<IncarnationEvent>` in file order.
+    pub fn incarnations(&self) -> Vec<Incarnation> {
+        self.events("IncarnationEvent")
+            .map(|e| Incarnation {
+                character: e.attr("character").unwrap_or("").to_string(),
+                start: e.attr("startFrameNumber").and_then(|v| v.trim().parse::<i32>().ok()).unwrap_or(0),
+                level: e.attr("physicsLevel").unwrap_or("").to_string(),
+            })
+            .collect()
+    }
+    fn events<'a>(&'a self, tag: &'a str) -> impl Iterator<Item = &'a Node> + 'a {
+        self.raw.child("Events").into_iter().flat_map(move |e| e.children.iter().filter(move |c| c.tag == tag))
+    }
     /// Every `SecondaryBehaviour` of the scene in file order (`behaviourName` carrying elements only).
     pub fn behaviour_instances(&self) -> Vec<BehaviourInstance> {
         self.raw

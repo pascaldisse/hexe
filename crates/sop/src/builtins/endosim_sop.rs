@@ -3,8 +3,9 @@
 //! simulation at frame `$F`. Frame 1 = the scene's start pose; frame N = N-1 steps of 1/fps later. The node steps lazily and
 //! caches every simulated pose, so scrubbing forwards advances the sim and scrubbing back replays the cache; a changed file / fps
 //! restarts. Param `frame`: 0 = follow the timeline `$F` (`ctx.time * ctx.fps + 1`), > 0 = fixed 1-based frame.
-//! Param `behaviours` (default 1): 1 = active ragdoll (`endo_sim::behaviour`: the scene's `Bob2: CatchFall` joint drives + its `<ForceEvent>`
-//! pushes), 0 = the passive ragdoll of h44 (characters fall and slump). Behaviours without a controller are ignored (NMB.md).
+//! Param `behaviours` (default 2): 0 = the passive ragdoll of h44 (characters fall and slump), 1 = h46 (`endo_sim::behaviour`: the
+//! scene's `Bob2: CatchFall` joint drives + its `<ForceEvent>` pushes), 2 = PLAY (h47: + `endo_sim::behave` pose hold / balance /
+//! Stagger / Arms Windmill / Legs Straighten / brace). Behaviours without a controller are ignored (NMB.md).
 use crate::SopNode;
 use endo_sim::{CharPose, Sim, SimOptions};
 use hexe_geo::endorphin::{Document, Scene};
@@ -21,9 +22,9 @@ pub fn spec() -> Vec<ParamSpec> {
         ParamSpec::new("frame", ParamValue::I(0))
             .label("Frame Override (0 = follow timeline $F; else 1-based sim frame)")
             .range(0.0, MAX_FRAME as f32),
-        ParamSpec::new("behaviours", ParamValue::I(1))
-            .label("Behaviours (1 = active ragdoll: scene behaviours + force events, 0 = passive ragdoll)")
-            .range(0.0, 1.0),
+        ParamSpec::new("behaviours", ParamValue::I(2))
+            .label("Behaviours (0 = passive ragdoll, 1 = CatchFall drives + force events, 2 = play: + pose hold / balance / secondary)")
+            .range(0.0, 2.0),
     ]
 }
 
@@ -31,7 +32,7 @@ pub fn new() -> Box<SopNode> {
     Box::new(EndoSim { specs: spec(), state: Mutex::new(None) })
 }
 
-type FileKey = (String, Option<SystemTime>, u64, u32, bool);
+type FileKey = (String, Option<SystemTime>, u64, u32, i32);
 
 /// Everything the node keeps between cooks: the scene, the live sim and the pose of every frame simulated so far.
 struct State {
@@ -96,12 +97,13 @@ impl Node<Detail> for EndoSim {
         let want =
             if fixed > 0 { fixed } else { ((time * ctx.fps).round() as i64 + 1).clamp(1, i64::from(MAX_FRAME)) as i32 };
         let meta = std::fs::metadata(&path).map_err(|e| CookError::Failed(format!("{path}: {e}")))?;
-        let active = ctx.params.int("behaviours").unwrap_or(1) != 0;
-        let key: FileKey = (path.clone(), meta.modified().ok(), meta.len(), ctx.fps.to_bits(), active);
+        let mode = ctx.params.int("behaviours").unwrap_or(2).clamp(0, 2);
+        let key: FileKey = (path.clone(), meta.modified().ok(), meta.len(), ctx.fps.to_bits(), mode);
         let mut slot = self.state.lock().map_err(|_| CookError::Failed("endosim state poisoned".into()))?;
         if slot.as_ref().is_none_or(|s| s.key != key) {
             let scene = load_scene(&path)?;
-            let sim = Sim::from_scene_with(&scene, SimOptions { behaviours: active, forces: active });
+            let opt = SimOptions { behaviours: mode >= 1, forces: mode >= 1, secondary: mode >= 2 };
+            let sim = Sim::from_scene_with(&scene, opt);
             let poses = vec![sim.pose()];
             *slot = Some(State { key, scene: Arc::new(scene), sim, poses, last: None });
         }

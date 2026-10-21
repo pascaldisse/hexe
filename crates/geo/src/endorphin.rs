@@ -498,6 +498,33 @@ impl Character {
     pub fn rest_locals(&self) -> Vec<Xf> {
         self.joints.iter().map(|j| j.xf).collect()
     }
+    /// `base` overlaid with the animation channels of `chans` sampled at `t` seconds (parent-local, joint order).
+    /// Channel naming rule (SURVEY.md "Scene pose"): `<char>.Joints.<joint>.{quat,tx,ty,tz}` or `<char>.<joint>.{...}`.
+    pub fn locals_at(&self, base: &[Xf], chans: &[Channel], t: f32) -> Vec<Xf> {
+        let by_name: std::collections::HashMap<&str, &Channel> =
+            chans.iter().map(|ch| (ch.name.as_str(), ch)).collect();
+        self.joints
+            .iter()
+            .enumerate()
+            .map(|(idx, j)| {
+                let mut x = base.get(idx).copied().unwrap_or(j.xf);
+                for pre in [format!("{}.Joints.{}.", self.name, j.name), format!("{}.{}.", self.name, j.name)] {
+                    let get = |leaf: &str| by_name.get(format!("{pre}{leaf}").as_str()).and_then(|ch| ch.sample(t));
+                    if let Some(q) = get("quat").filter(|q| q.len() == 4) {
+                        let r = Xf::from_quat([q[0], q[1], q[2], q[3]]);
+                        (x.i, x.j, x.k) = (r.i, r.j, r.k);
+                    }
+                    for (axis, leaf) in ["tx", "ty", "tz"].into_iter().enumerate() {
+                        if let (Some(v), Some(slot)) = (get(leaf).and_then(|v| v.first().copied()), x.p.get_mut(axis))
+                        {
+                            *slot = v;
+                        }
+                    }
+                }
+                x
+            })
+            .collect()
+    }
     /// Joint world transforms from parent-local `locals` (joint order): chain product, no placement.
     pub fn world_of(&self, locals: &[Xf]) -> Vec<Xf> {
         let mut w: Vec<Xf> = Vec::with_capacity(self.joints.len());
@@ -674,6 +701,29 @@ impl Channel {
     }
 }
 
+/// Every `<Channel>` / `<QuatChannel>` directly under `anim` (a scene `<Animation>` or an `<AnimationEvent><Animation>`).
+pub fn channels_of(anim: &Node) -> Vec<Channel> {
+    anim.children
+        .iter()
+        .filter(|c| c.tag == "Channel" || c.tag == "QuatChannel")
+        .map(|c| Channel {
+            name: c.attr("name").unwrap_or("").to_string(),
+            quat: c.tag == "QuatChannel",
+            interp: c.attr("type").unwrap_or("").to_string(),
+            keys: c
+                .kids("Key")
+                .map(|k| {
+                    if c.tag == "QuatChannel" {
+                        ["t", "x", "y", "z", "w"].iter().map(|a| k.f32(a).unwrap_or(0.0)).collect()
+                    } else {
+                        ["x", "y"].iter().map(|a| k.f32(a).unwrap_or(0.0)).collect()
+                    }
+                })
+                .collect(),
+        })
+        .collect()
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Scene {
     pub gravity: [f32; 3],
@@ -697,30 +747,7 @@ impl Scene {
                 behaviours.extend(g.children.iter().map(Behaviour::from_node));
             }
         }
-        let channels = n
-            .child("Animation")
-            .map(|a| {
-                a.children
-                    .iter()
-                    .filter(|c| c.tag == "Channel" || c.tag == "QuatChannel")
-                    .map(|c| Channel {
-                        name: c.attr("name").unwrap_or("").to_string(),
-                        quat: c.tag == "QuatChannel",
-                        interp: c.attr("type").unwrap_or("").to_string(),
-                        keys: c
-                            .kids("Key")
-                            .map(|k| {
-                                if c.tag == "QuatChannel" {
-                                    ["t", "x", "y", "z", "w"].iter().map(|a| k.f32(a).unwrap_or(0.0)).collect()
-                                } else {
-                                    ["x", "y"].iter().map(|a| k.f32(a).unwrap_or(0.0)).collect()
-                                }
-                            })
-                            .collect(),
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
+        let channels = n.child("Animation").map(channels_of).unwrap_or_default();
         let eng = n.child("Engine");
         Scene {
             gravity: eng.and_then(|e| e.child("Gravity")).map_or([0.0, -9.81, 0.0], Node::vec3),

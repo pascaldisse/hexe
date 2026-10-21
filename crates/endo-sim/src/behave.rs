@@ -17,7 +17,7 @@
 //!    direction (upper arms point at the ground ahead, elbows straight) and softens the legs so the body can fold instead of
 //!    toppling as a plank.
 use super::{Rig, inverse, quat_of, v3};
-use hexe_geo::endorphin::{Character, Node, Scene};
+use hexe_geo::endorphin::{Channel, Character, Node, Scene};
 use rapier3d::glamx::{Quat, Vec3};
 use rapier3d::prelude::*;
 use std::collections::HashMap;
@@ -128,14 +128,64 @@ impl Beh {
     }
 }
 
+/// One `<DesiredPoseEvent>`: a window, its strength and the authored relative rotations per jc.
+struct PoseTarget {
+    start: f32,
+    end: f32,
+    strength: f32,
+    /// The event carried a `<Pose>` (false = hold the start pose).
+    authored: bool,
+    rels: Vec<Quat>,
+}
+
+/// One `<AnimationEvent>` clip, sampled per ens frame of its window: world body poses + relative rotations per jc.
+struct Track {
+    start: f32,
+    end: f32,
+    active: bool,
+    worlds: Vec<Vec<crate::Xf>>,
+    rels: Vec<Vec<Quat>>,
+}
+
+impl Track {
+    fn at(&self, fr: f32) -> Option<usize> {
+        if fr < self.start || fr > self.end {
+            return None;
+        }
+        let k = (fr - self.start).round().max(0.0) as usize;
+        (k < self.worlds.len()).then_some(k)
+    }
+}
+
+/// Key spacing (s) of a clip: the smallest positive gap between the first two keys of a channel (corpus: 1/30 s).
+fn key_spacing(chans: &[Channel]) -> f32 {
+    chans
+        .iter()
+        .filter_map(|c| {
+            let (a, b) = (c.keys.first()?.first()?, c.keys.get(1)?.first()?);
+            Some(b - a).filter(|d| d.is_finite() && *d > 1e-5)
+        })
+        .fold(f32::INFINITY, f32::min)
+        .clamp(1e-5, 1.0)
+}
+
 struct Ctl {
     name: String,
     jcs: Vec<Jc>,
     standing: bool,
     behs: Vec<Beh>,
     ignored: Vec<String>,
-    /// `(start, end, strength)` frame windows of `DesiredPoseEvent`s.
-    poses: Vec<(f32, f32, f32)>,
+    /// `<DesiredPoseEvent>` windows with their authored active pose.
+    poses: Vec<PoseTarget>,
+    /// `<AnimationEvent>` clips, pre-sampled per ens frame.
+    tracks: Vec<Track>,
+    /// Frame this character turns into a full-physics ragdoll (`None` = dynamic from the start, `inf` = never).
+    switch: Option<f32>,
+    /// Bodies are currently kinematic (driven by the clip).
+    kinematic: bool,
+    init: bool,
+    /// ens frames per second (`positionBufferFrameRate`).
+    fps: f32,
     /// Heading frame from the start pose: forward / left (horizontal unit vectors).
     fwd: Vec3,
     left: Vec3,
@@ -292,7 +342,8 @@ impl Behave {
             .unwrap_or(DEFAULT_FRAME_RATE);
         let mut chars = Vec::new();
         for (c, rig) in scene.characters.iter().zip(rigs) {
-            if let Some(ctl) = Ctl::build(scene, c, rig, world) {
+            if let Some(mut ctl) = Ctl::build(scene, c, rig, world) {
+                ctl.fps = fps;
                 chars.push(ctl);
             }
         }
@@ -413,17 +464,80 @@ impl Ctl {
             _ => false,
         };
         let (behs, ignored) = parse_behaviours(scene, c);
-        let mut poses = Vec::new();
-        if let Some(ev) = scene.raw.child("Events") {
-            for e in ev.kids("DesiredPoseEvent").filter(|e| e.attr("character") == Some(c.name.as_str())) {
-                let f = |k: &str| e.attr(k).and_then(|v| v.parse::<f32>().ok());
-                poses.push((
-                    f("startFrameNumber").unwrap_or(0.0),
-                    f("endFrameNumber").unwrap_or(0.0),
-                    f("strength").unwrap_or(1.0),
-                ));
+        // relative rotation (anchor body -> own body) of a parent-local `locals` set, per jc
+        let rels_of = |locals: &[crate::Xf]| -> Vec<Quat> {
+            let world: Vec<crate::Xf> = c.world_of(locals).iter().map(|x| c.xf.mul(x)).collect();
+            (0..jcs.len())
+                .map(|k| {
+                    let i = joint_of.get(k).copied().unwrap_or(0);
+                    match jcs.get(k).and_then(|j| j.parent).and_then(|p| joint_of.get(p).copied()) {
+                        Some(a) => match (world.get(a), world.get(i)) {
+                            (Some(wa), Some(wi)) => rel_quat(wa, wi),
+                            _ => Quat::IDENTITY,
+                        },
+                        None => Quat::IDENTITY,
+                    }
+                })
+                .collect()
+        };
+        let base = scene.posed_locals(c, 0.0);
+        // `<DesiredPoseEvent>`: the authored active pose, as servo targets
+        let poses: Vec<PoseTarget> = scene
+            .pose_events()
+            .into_iter()
+            .filter(|e| e.character == c.name)
+            .map(|e| {
+                let mut locals = base.clone();
+                for (name, xf) in &e.pose {
+                    if let Some(i) = c.joints.iter().position(|j| j.name == *name)
+                        && let Some(slot) = locals.get_mut(i)
+                    {
+                        *slot = *xf;
+                    }
+                }
+                PoseTarget {
+                    start: e.start as f32,
+                    end: e.end as f32,
+                    strength: e.strength,
+                    authored: !e.pose.is_empty(),
+                    rels: rels_of(&locals),
+                }
+            })
+            .collect();
+        // `<AnimationEvent>`: the imported clip, sampled per ens frame into world poses + servo targets
+        let tracks: Vec<Track> = scene
+            .anim_events()
+            .into_iter()
+            .filter(|e| e.character == c.name && !e.channels.is_empty())
+            .map(|e| {
+                let dt = key_spacing(&e.channels);
+                let n = (e.end - e.start).max(0) as usize + 1;
+                let (mut worlds, mut rels) = (Vec::with_capacity(n), Vec::with_capacity(n));
+                for f in 0..n {
+                    let t = (e.frame_offset as f32 + f as f32) * dt;
+                    let locals = c.locals_at(&base, &e.channels, t);
+                    worlds.push(
+                        (0..jcs.len())
+                            .map(|k| {
+                                let i = joint_of.get(k).copied().unwrap_or(0);
+                                c.world_of(&locals).get(i).copied().unwrap_or_default()
+                            })
+                            .map(|x| c.xf.mul(&x))
+                            .collect::<Vec<crate::Xf>>(),
+                    );
+                    rels.push(rels_of(&locals));
+                }
+                Track { start: e.start as f32, end: e.end as f32, active: e.active, worlds, rels }
+            })
+            .collect();
+        // `<IncarnationEvent>`: the frame this character becomes a full-physics ragdoll (None = dynamic from frame 0)
+        let inc: Vec<_> = scene.incarnations().into_iter().filter(|i| i.character == c.name).collect();
+        let switch = match inc.first() {
+            Some(first) if !first.full_physics() => {
+                inc.iter().find(|i| i.full_physics()).map(|i| i.start as f32).or(Some(f32::INFINITY))
             }
-        }
+            _ => None,
+        };
         let mut ctl = Ctl {
             name: c.name.clone(),
             jcs,
@@ -431,6 +545,11 @@ impl Ctl {
             behs,
             ignored,
             poses,
+            tracks,
+            switch,
+            kinematic: false,
+            init: false,
+            fps: DEFAULT_FRAME_RATE,
             fwd,
             left,
             ankles,
@@ -524,16 +643,86 @@ impl Ctl {
         }
     }
 
+    /// Pose-hold strength in force at `fr`: the `DesiredPoseEvent` strength (the file's scale saturates the servo at 1),
+    /// else `HOLD_DEFAULT`.
     fn hold_strength(&self, fr: f32) -> f32 {
-        self.poses
-            .iter()
-            .filter(|(a, b, _)| fr >= *a && fr <= *b)
-            .map(|(_, _, s)| *s)
-            .reduce(f32::max)
-            .unwrap_or(HOLD_DEFAULT)
+        self.pose_event(fr).map_or(HOLD_DEFAULT, |p| p.strength.clamp(0.0, 1.0))
+    }
+    /// Last `DesiredPoseEvent` covering `fr` (file order = priority order).
+    fn pose_event(&self, fr: f32) -> Option<&PoseTarget> {
+        self.poses.iter().filter(|p| fr >= p.start && fr <= p.end).next_back()
+    }
+    /// Clip (`AnimationEvent`) covering `fr` and the sampled index in it: the last enabled event wins.
+    fn track_at(&self, fr: f32) -> Option<(&Track, usize)> {
+        self.tracks.iter().filter_map(|t| t.at(fr).map(|k| (t, k))).next_back()
+    }
+    /// Servo target of jc `k` at `fr`: active clip pose > authored active pose > the scene start pose.
+    fn target_rel(&self, k: usize, fr: f32) -> Quat {
+        if let Some((t, i)) = self.track_at(fr)
+            && t.active
+            && let Some(q) = t.rels.get(i).and_then(|r| r.get(k))
+        {
+            return *q;
+        }
+        if let Some(p) = self.pose_event(fr).filter(|p| p.authored)
+            && let Some(q) = p.rels.get(k)
+        {
+            return *q;
+        }
+        self.jcs.get(k).map_or(Quat::IDENTITY, |j| j.rest_rel)
+    }
+    /// Drive the bodies kinematically from the clip while the character is not yet a full-physics ragdoll.
+    /// Returns true when the controller must stand down this substep (the clip owns the body).
+    fn drive_kinematic(&mut self, w: &mut PhysicsWorld, fr: f32, dt: f32) -> bool {
+        let Some(switch) = self.switch else { return false };
+        if !self.init {
+            self.init = true;
+            self.kinematic = true;
+            for j in &self.jcs {
+                if let Some(b) = w.bodies.get_mut(j.body) {
+                    b.set_body_type(RigidBodyType::KinematicPositionBased, true);
+                }
+            }
+        }
+        if fr >= switch {
+            if self.kinematic {
+                self.kinematic = false;
+                // hand over to the solver with the clip's own velocity (finite difference over one substep)
+                let prev = self.track_at((fr - dt * self.fps).max(0.0));
+                for (k, j) in self.jcs.iter().enumerate() {
+                    let (now, before) = (
+                        self.track_at(fr).and_then(|(t, i)| t.worlds.get(i).and_then(|v| v.get(k)).copied()),
+                        prev.and_then(|(t, i)| t.worlds.get(i).and_then(|v| v.get(k)).copied()),
+                    );
+                    if let Some(b) = w.bodies.get_mut(j.body) {
+                        b.set_body_type(RigidBodyType::Dynamic, true);
+                        if let (Some(a), Some(c)) = (now, before) {
+                            let v = (v3(a.p) - v3(c.p)) / dt.max(1e-4);
+                            if v.is_finite() && v.length() < 50.0 {
+                                b.set_linvel(v, true);
+                            }
+                        }
+                    }
+                }
+            }
+            return false;
+        }
+        let Some((t, i)) = self.track_at(fr) else { return true };
+        let poses: Vec<Option<crate::Xf>> = (0..self.jcs.len()).map(|k| t.worlds.get(i).and_then(|v| v.get(k)).copied()).collect();
+        for (k, j) in self.jcs.iter().enumerate() {
+            let Some(Some(x)) = poses.get(k) else { continue };
+            if let Some(b) = w.bodies.get_mut(j.body) {
+                b.set_next_kinematic_position(Pose::from_parts(v3(x.p), quat_of(x)));
+            }
+        }
+        true
     }
 
+
     fn apply(&mut self, w: &mut PhysicsWorld, fr: f32, t: f32, dt: f32) {
+        if self.drive_kinematic(w, fr, dt) {
+            return;
+        }
         let Some(st) = self.snapshot(w) else { return };
         let n = st.len();
         let (com, mass) = self.com(&st);
@@ -623,9 +812,11 @@ let ec = if self.feet.is_empty() { e } else { horiz(com) - centre };
         };
         // ---- goals
         let mut goals: Vec<Goal> = Vec::with_capacity(n);
+        let authored: Vec<Quat> = (0..self.jcs.len()).map(|k| self.target_rel(k, fr)).collect();
         for (k, j) in self.jcs.iter().enumerate() {
             let mut s = hold;
-            let mut q = j.rest_rel;
+            // target = the authored active pose / clip pose of this frame (start pose when the file authors none)
+            let mut q = authored.get(k).copied().unwrap_or(j.rest_rel);
             match j.part {
                 Part::Hip | Part::Knee => {
                     s *= 1.0 - 0.55 * fall;
@@ -637,7 +828,7 @@ let ec = if self.feet.is_empty() { e } else { horiz(com) - centre };
                     }
                     let k = if j.left { legs[0] } else { legs[1] };
                     if k > 0.0 {
-                        q = j.rest_rel.slerp(j.rig_rel, k.clamp(0.0, 1.0));
+                        q = q.slerp(j.rig_rel, k.clamp(0.0, 1.0));
                         s = s.max(0.5 + 0.5 * k);
                     }
                 }

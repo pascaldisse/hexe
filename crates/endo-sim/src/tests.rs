@@ -352,3 +352,52 @@ fn car_hit_car_follows_its_authored_timeline_instead_of_falling() {
     assert!((p[1] - y0).abs() < 0.2, "the car keeps its authored height: {p:?} vs {y0}");
     assert!(p[2].is_finite() && hit > 0, "the car reaches the character: contacts {hit}");
 }
+
+/// A 4 x 0.2 x 4 m static slab (top y = 3, no default ground) under a falling character: body `b` (capsule) at y = `y`,
+/// plus a virtual-muscle joint `vm` (child of root) that names the same body.
+fn slab_scene(y: f32) -> Scene {
+    let xml = format!(
+        r#"<Scene useDefaultGround="false"><Characters><Character name="p">
+<Skeleton name="root" metaBody="b"><TransformMatrix><Vp x="0" y="{y}" z="0"/></TransformMatrix>
+<ChildJoints><SkeletalJoint name="vm" metaBody="b" isVirtualMuscle="true"><TransformMatrix><Vp x="0" y="0.5" z="0"/></TransformMatrix></SkeletalJoint></ChildJoints></Skeleton>
+<MetaBodies><MetaBody name="b"><CollisionSurface><Geometry type="Sphyl" param0="0.05" param1="0.3"/></CollisionSurface>
+<InertialBody><Geometry type="Sphyl" param0="0.05" param1="0.3"/><Inertia density="1.5"/></InertialBody></MetaBody></MetaBodies>
+</Character></Characters>
+<Environment name="env"><Skeleton name="floor" metaBody="slab"><TransformMatrix><Vp x="0" y="2.9" z="0"/></TransformMatrix></Skeleton>
+<MetaBodies><MetaBody name="slab"><CollisionSurface><Geometry type="Cuboid" param0="4" param1="0.2" param2="4"/></CollisionSurface></MetaBody></MetaBodies>
+</Environment></Scene>"#
+    );
+    Scene::from_node(&parse_xml(&xml).unwrap())
+}
+
+#[test]
+fn thin_slab_drop_rests_on_top_in_every_mode() {
+    for opt in [SimOptions { behaviours: false, forces: false, secondary: false }, PLAY] {
+        // dropped from 2 m above the 0.2 m slab: lands at ~6 m/s and must stay on top (not tunnel / flip below the midplane)
+        let mut sim = Sim::from_scene_with(&slab_scene(5.0), opt);
+        let mut low = f32::MAX;
+        for _ in 0..90 {
+            sim.step(1.0 / 30.0);
+            low = low.min(sim.env_penetration()[0].1);
+        }
+        let y = sim.root_y("p").unwrap();
+        assert!(y > 3.0 && y < 3.3, "rests on top of the slab: y {y} ({opt:?})");
+        assert!(low > -0.02, "never sinks > 2 cm into the slab: {low} ({opt:?})");
+        // the probe sees a body pushed into the slab
+        let mut deep = Sim::from_scene_with(&slab_scene(2.95), opt);
+        assert!(deep.env_penetration()[0].1 < -0.04, "probe: {:?}", deep.env_penetration());
+        deep.step(1.0 / 30.0);
+    }
+}
+
+#[test]
+fn virtual_muscle_rides_the_body_it_names() {
+    // `vm` names body `b` that `root` owns: posed (= drawn) there, not 0.5 m off on its own rigid chain
+    let mut sim = Sim::from_scene(&slab_scene(5.0));
+    for _ in 0..20 {
+        sim.step(1.0 / 30.0);
+    }
+    let pose = sim.pose();
+    let (r, v) = (pose[0].world[0].p, pose[0].world[1].p);
+    assert!((0..3).all(|k| (r[k] - v[k]).abs() < 1e-5), "vm {v:?} vs owner {r:?}");
+}

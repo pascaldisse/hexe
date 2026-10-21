@@ -1,0 +1,66 @@
+//! `clearance scene.ens [mode 0|1|2] [frames]`: per character, deepest penetration into the static world (`Sim::env_penetration`) over F1..=frames
+//! at 30 fps, plus the frame and joint where it happened (negative = sunk in).
+use endo_sim::{Sim, SimOptions};
+use hexe_geo::endorphin::{Document, read_endorphin};
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let a: Vec<String> = std::env::args().collect();
+    let path = a.get(1).ok_or("usage: clearance scene.ens [mode] [frames]")?;
+    let Document::Scene(s) = read_endorphin(&std::fs::read(path)?)? else { return Err("not a scene".into()) };
+    if std::env::var("DUMP").is_ok() {
+        dump(&s);
+        return Ok(());
+    }
+    let mode: i32 = a.get(2).and_then(|v| v.parse().ok()).unwrap_or(2);
+    let frames: usize = a.get(3).and_then(|v| v.parse().ok()).unwrap_or(300);
+    let mut sim =
+        Sim::from_scene_with(&s, SimOptions { behaviours: mode >= 1, forces: mode >= 1, secondary: mode >= 2 });
+    if let Ok(w) = std::env::var("WHO") {
+        let (who, at) = w.split_once(':').unwrap_or((&w, "1"));
+        let at: usize = at.parse().unwrap_or(1);
+        for _ in 1..at {
+            sim.step(1.0 / 30.0);
+        }
+        for (n, d, j) in sim.env_penetration() {
+            if n == who {
+                let c = s.characters.iter().find(|c| c.name == n).ok_or("?")?;
+                let jn = &c.joints[j].name;
+                println!("{n} F{at} {jn} d={d:.3} pos={:?} root={:?}", sim.joint_pos(&n, jn), sim.root_y(&n));
+            }
+        }
+        return Ok(());
+    }
+    let mut worst: Vec<(String, f32, usize, usize)> = Vec::new();
+    for f in 1..=frames {
+        if f > 1 {
+            sim.step(1.0 / 30.0);
+        }
+        let rows = sim.env_penetration();
+        for (name, d, j) in rows {
+            match worst.iter_mut().find(|w| w.0 == name) {
+                Some(w) if d < w.1 => *w = (name, d, f, j),
+                Some(_) => {}
+                None => worst.push((name, d, f, j)),
+            }
+        }
+    }
+    for (name, d, f, j) in worst {
+        let jn = s
+            .characters
+            .iter()
+            .find(|c| c.name == name.as_str())
+            .and_then(|c| c.joints.get(j))
+            .map_or("?", |j| &j.name);
+        println!("{name}\tmin {d:.3}\tF{f}\t{jn}");
+    }
+    Ok(())
+}
+#[allow(dead_code)]
+fn dump(s: &hexe_geo::endorphin::Scene) {
+    for c in &s.characters {
+        for j in &c.joints {
+            if let Some(b) = &j.body {
+                println!("{} {} -> {} virt={:?}", c.name, j.name, b, j.raw.attr("isVirtualMuscle"));
+            }
+        }
+    }
+}

@@ -63,6 +63,10 @@ enum Drive {
     Body(RigidBodyHandle),
     /// Rides joint `anchor` (index in the same character): world = world[anchor] * offset.
     Follow { anchor: usize, offset: Xf },
+    /// Names a body another joint owns (virtual muscle -> hand / heel mass): world = that body's pose, so the shared geometry
+    /// is drawn where its collider is (riding the own ancestor chain carried it rigidly through the floor, no collider there).
+    /// The controllers (`joint_world`) keep the rigid `Follow` of `anchor` / `offset` (e.g. the head axis to `UpperNeckEndJoint`).
+    Shared { body: RigidBodyHandle, anchor: usize, offset: Xf },
     /// No body anywhere above: stays at its start-pose world matrix.
     Fixed(Xf),
 }
@@ -368,7 +372,9 @@ impl Sim {
                 let mut world: Vec<Xf> = Vec::with_capacity(r.drives.len());
                 for d in &r.drives {
                     let x = match d {
-                        Drive::Body(h) => self.world.bodies.get(*h).map_or_else(Xf::default, |b| xf_of(b.position())),
+                        Drive::Body(h) | Drive::Shared { body: h, .. } => {
+                            self.world.bodies.get(*h).map_or_else(Xf::default, |b| xf_of(b.position()))
+                        }
                         Drive::Follow { anchor, offset } => world.get(*anchor).map_or(*offset, |a| a.mul(offset)),
                         Drive::Fixed(x) => *x,
                     };
@@ -385,7 +391,7 @@ impl Sim {
         match r.drives.first()? {
             Drive::Body(h) => self.world.bodies.get(*h).map(|b| b.translation().y),
             Drive::Fixed(x) => Some(x.p[1]),
-            Drive::Follow { .. } => {
+            Drive::Follow { .. } | Drive::Shared { .. } => {
                 self.pose().into_iter().find(|p| p.name == character)?.world.first().map(|x| x.p[1])
             }
         }
@@ -395,7 +401,9 @@ impl Sim {
     fn joint_world(&self, rig: &Rig, idx: usize) -> Option<Xf> {
         match rig.drives.get(idx)? {
             Drive::Body(h) => self.world.bodies.get(*h).map(|b| xf_of(b.position())),
-            Drive::Follow { anchor, offset } => Some(self.joint_world(rig, *anchor)?.mul(offset)),
+            Drive::Follow { anchor, offset } | Drive::Shared { anchor, offset, .. } => {
+                Some(self.joint_world(rig, *anchor)?.mul(offset))
+            }
             Drive::Fixed(x) => Some(*x),
         }
     }
@@ -447,6 +455,46 @@ impl Sim {
                     out.push((j, on, other.map(|(_, oj)| oj), imp));
                 }
             }
+        }
+        out
+    }
+    /// Diagnostics: per dynamic character, `(deepest penetration m, joint index)` into the static world (environment, ground):
+    /// minus the depth inside a static collider of each body's lowest point (its support point along -Y) or of its origin
+    /// (tunnelled past the contact). 0 = nothing sunk. Exact point queries (contact manifolds of huge boxes are unreliable).
+    pub fn env_penetration(&self) -> Vec<(String, f32, usize)> {
+        let statics: Vec<&Collider> = self
+            .world
+            .colliders
+            .iter()
+            .map(|(_, c)| c)
+            .filter(|c| c.parent().and_then(|p| self.world.bodies.get(p)).is_none_or(|b| b.is_fixed()))
+            .collect();
+        let depth = |p: Vec3| {
+            statics
+                .iter()
+                .filter(|s| s.shape().contains_point(s.position(), p))
+                .map(|s| -s.shape().distance_to_point(s.position(), p, false).abs())
+                .fold(0.0f32, f32::min)
+        };
+        let mut out = Vec::new();
+        for r in self.rigs.iter().filter(|r| r.dynamic) {
+            let mut best = (0.0f32, 0usize);
+            for (j, h) in r.handles.iter().enumerate() {
+                let Some(b) = h.and_then(|h| self.world.bodies.get(h)) else { continue };
+                let mut pts = vec![b.translation()];
+                for c in b.colliders().iter().filter_map(|h| self.world.colliders.get(*h)) {
+                    if let Some(m) = c.shape().as_support_map() {
+                        pts.push(m.support_point(c.position(), -Vec3::Y));
+                    }
+                }
+                for p in pts {
+                    let d = depth(p);
+                    if d < best.0 {
+                        best = (d, j);
+                    }
+                }
+            }
+            out.push((r.name.clone(), best.0, best.1));
         }
         out
     }
@@ -564,16 +612,24 @@ fn add_character(
             }
         }
     }
+    // body name -> rigid body of the joint that owns it
+    let owned =
+        |name: &str| c.joints.iter().zip(&handles).find_map(|(j, h)| h.filter(|_| j.body.as_deref() == Some(name)));
     let drives = c
         .joints
         .iter()
         .enumerate()
-        .map(|(i, _)| {
+        .map(|(i, j)| {
             let own = rest.get(i).copied().unwrap_or_default();
+            let shared = j.body.as_deref().and_then(owned);
             match (handles.get(i).copied().flatten(), anchor.get(i).copied().flatten()) {
                 (Some(h), _) => Drive::Body(h),
                 (None, Some(a)) => {
-                    Drive::Follow { anchor: a, offset: inverse(&rest.get(a).copied().unwrap_or_default()).mul(&own) }
+                    let offset = inverse(&rest.get(a).copied().unwrap_or_default()).mul(&own);
+                    match shared {
+                        Some(body) => Drive::Shared { body, anchor: a, offset },
+                        None => Drive::Follow { anchor: a, offset },
+                    }
                 }
                 (None, None) => Drive::Fixed(own),
             }

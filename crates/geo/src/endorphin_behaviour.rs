@@ -145,7 +145,10 @@ impl BehaviourInstance {
             end: int("endFrameNumber").unwrap_or(0),
             priority: int("priority").unwrap_or(0),
             enabled: n.bool("enabled").unwrap_or(true),
-            params: n.child("Parameters").map(|p| p.kids("Variable").map(Param::from_node).collect()).unwrap_or_default(),
+            params: n
+                .child("Parameters")
+                .map(|p| p.kids("Variable").map(Param::from_node).collect())
+                .unwrap_or_default(),
         })
     }
     /// Parameter by scene key (`fk`), e.g. `ArmsStrength`.
@@ -314,7 +317,10 @@ impl Scene {
     }
     /// Every `<ForceEvent>`.
     pub fn force_events(&self) -> Vec<ForceEvent> {
-        self.raw.child("ForceEvents").map(|g| g.kids("ForceEvent").map(ForceEvent::from_node).collect()).unwrap_or_default()
+        self.raw
+            .child("ForceEvents")
+            .map(|g| g.kids("ForceEvent").map(ForceEvent::from_node).collect())
+            .unwrap_or_default()
     }
 }
 
@@ -375,7 +381,10 @@ mod tests {
         let b = s.behaviour_instances();
         assert_eq!(b.len(), 1);
         let b = &b[0];
-        assert_eq!((b.behaviour.as_str(), b.character.as_str(), b.start, b.end), ("Bob2: CatchFall 2.0", "character02", 0, 300));
+        assert_eq!(
+            (b.behaviour.as_str(), b.character.as_str(), b.start, b.end),
+            ("Bob2: CatchFall 2.0", "character02", 0, 300)
+        );
         assert_eq!(b.f32("ArmsStrength", -1.0), 0.7);
         assert_eq!(b.f32("GroundHeight", 9.0), 9.0, "valueless -> default");
         assert_eq!(b.f32("Missing", 4.0), 4.0);
@@ -390,7 +399,9 @@ mod tests {
 
     #[test]
     fn hostile_input_returns_none_or_defaults() {
-        for x in ["<cc/>", "<cc><RefNames/></cc>", "<cc><RefNames><Name/></RefNames><ry><wx kg=\"x\" sv=\"-1\"/></ry></cc>"] {
+        for x in
+            ["<cc/>", "<cc><RefNames/></cc>", "<cc><RefNames><Name/></RefNames><ry><wx kg=\"x\" sv=\"-1\"/></ry></cc>"]
+        {
             let _ = NmbInterface::from_node(&parse_xml(x).unwrap());
         }
         let n = parse_xml("<SecondaryBehaviour behaviourName=\"a\" character=\"c\" startFrameNumber=\"zz\"/>").unwrap();
@@ -420,7 +431,9 @@ mod tests {
             let Document::Scene(s) = read_endorphin(&std::fs::read(p).unwrap()).unwrap() else { continue };
             for b in s.behaviour_instances() {
                 inst += 1;
-                let i = by_name.get(&b.behaviour).unwrap_or_else(|| panic!("{}: unknown behaviour {}", p.display(), b.behaviour));
+                let i = by_name
+                    .get(&b.behaviour)
+                    .unwrap_or_else(|| panic!("{}: unknown behaviour {}", p.display(), b.behaviour));
                 for v in &b.params {
                     let Some(l) = v.label.as_deref() else { continue };
                     labelled += 1;

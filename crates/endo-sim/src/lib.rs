@@ -216,7 +216,9 @@ fn limits_of(j: &Joint) -> Option<Limits> {
 /// Joints locked rigid in the `secondary` build (trunk, neck, clavicles, wrists, fingers, forearm twist, mid-foot, toes):
 /// their tiny segments are too light to servo stably, so the trunk and each hand / foot act as one rigid body.
 fn is_minor(name: &str) -> bool {
-    ["Spine", "Neck", "Clavicle", "Wrist", "Fingers", "ForearmTwist", "MidFoot", "Toes"].iter().any(|k| name.contains(k))
+    ["Spine", "Neck", "Clavicle", "Wrist", "Fingers", "ForearmTwist", "MidFoot", "Toes"]
+        .iter()
+        .any(|k| name.contains(k))
 }
 
 fn owner_joints(c: &Character) -> Vec<Option<usize>> {

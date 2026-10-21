@@ -515,8 +515,7 @@ impl Character {
                         (x.i, x.j, x.k) = (r.i, r.j, r.k);
                     }
                     for (axis, leaf) in ["tx", "ty", "tz"].into_iter().enumerate() {
-                        if let (Some(v), Some(slot)) = (get(leaf).and_then(|v| v.first().copied()), x.p.get_mut(axis))
-                        {
+                        if let (Some(v), Some(slot)) = (get(leaf).and_then(|v| v.first().copied()), x.p.get_mut(axis)) {
                             *slot = v;
                         }
                     }

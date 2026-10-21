@@ -1946,8 +1946,13 @@ evidence = [
   "crates/endo-sim/src/tests.rs::mini_scene_falls_onto_the_ground_and_stays_finite",
   "crates/endo-sim/src/tests.rs::balcony_standing_characters_fall_monotonically_without_nan",
   "crates/sop/src/builtins/endosim_sop.rs::tests::frame_scrubs_the_simulation",
+  "crates/sop/src/builtins/endosim_sop.rs::tests::behaviours_param_switches_the_active_ragdoll",
+  "crates/endo-sim/src/tests.rs::catch_fall_drive_keeps_the_head_off_the_ground_vs_forces_only",
+  "crates/endo-sim/src/tests.rs::catch_fall_is_deterministic_and_finite",
+  "crates/endo-sim/src/tests.rs::arms_strength_zero_equals_no_drive",
+  "crates/endo-sim/src/tests.rs::behaviours_without_the_arm_chain_or_character_are_ignored",
 ]
-notes = "h44, hexe-native (tag): no Houdini oracle. Crate endo-sim = rapier3d 0.35 f32: one dynamic body per MetaBody (Sphyl/Sphere/Cylinder/Cuboid, File/Mesh -> bbox capsule), spherical joints with hard (else soft) limits centred on the posed start configuration (twist about joint X), fixed joints where no limits, environment + default ground static, same-character collisions off. endosim SOP: input = file SOP on a .ens (found via detail attr endo_file), param frame 0 = follow timeline $F (frame F = F-1 steps of 1/fps), poses cached per frame (scrub back = replay). PASSIVE RAGDOLL ONLY: behaviours / balance / catch-fall muscles / drives are NOT simulated. UNVERIFIED vs the real Endorphin engine (rapier is not NaturalMotion's solver; limits are half-ranges about the start pose)."
+notes = "h46 UPDATE: param `behaviours` (default 1) = active ragdoll with ONE behaviour, Bob2 CatchFall (PD joint drives on the character `Normal` calibration, scene parameters ArmsApart/ArmsSpeed/ArmsStrength/PredictGroundHeight/GroundHeight, head tuck) + the scene ForceEvent pushes; 0 = passive (h44). The controller is AUTHORED from parameter names (the .nmb network is not decoded, oracle/endorphin/NMB.md); every other behaviour is ignored. ForceEvent magnitude mapping (relativeAcceleration x |Vk| x g) and the gain units are UNVERIFIED. h44 text follows: h44, hexe-native (tag): no Houdini oracle. Crate endo-sim = rapier3d 0.35 f32: one dynamic body per MetaBody (Sphyl/Sphere/Cylinder/Cuboid, File/Mesh -> bbox capsule), spherical joints with hard (else soft) limits centred on the posed start configuration (twist about joint X), fixed joints where no limits, environment + default ground static, same-character collisions off. endosim SOP: input = file SOP on a .ens (found via detail attr endo_file), param frame 0 = follow timeline $F (frame F = F-1 steps of 1/fps), poses cached per frame (scrub back = replay). Passive ragdoll when behaviours=0 (h46 adds the active mode, above). UNVERIFIED vs the real Endorphin engine (rapier is not NaturalMotion's solver; limits are half-ranges about the start pose)."
 
 [[feature]]
 id = "sop-copyxform"
@@ -2048,3 +2053,18 @@ evidence = [
   "apps/hexe-tauri/ui/src/parmmenu.test.ts::right-click menu: Houdini's entries in order, shortcuts, missing handlers grey out",
 ]
 notes = "UiExtra.chan: node -> channel (param, component tx / sizex, or spare name) -> expression; hexe_sop::chans::apply_channels evaluates them with hexe_graph::hscript before every cook (app cook_at and hexe-cli cook), writes params + spare values, settles chains in up to 16 passes (cycles stop there), failures reported per field (red) while the cook runs. Typing a value replaces the expression; renaming a node rewrites ../old/ references. Pane: Houdini's right-click menu entry for entry (Revert to Previous Value Shift+RMB, Expression > Edit / Delete, Copy Parameter, Paste Values, Paste Expressions / Channels, Paste Relative References, Paste Other > Absolute, Delete Channels Ctrl+Shift+LMB, Lock / Unlock Parameter (UiExtra.lock: setters refuse, channels skip), Revert to Defaults Ctrl+MMB, Make Current Value Default for spare parms; Channels / Keyframes / Motion FX / Reference / Include in Take / Factory Defaults / Export / More greyed = not in hexe yet); driven fields green, locked grey. Verified live: CONTROLLER spare int -> Copy Parameter -> a Transform's Uniform Scale Paste Relative References = ch(\"../CONTROLLER/newparameter2\") = 2, then 6 after editing. GAPS: references across objects (../../obj/node) and object-level params, $variables beyond F FF T FPS, keyframes, chs string channels into menus, .hip channel import still evaluates once at load (hip-expr)."
+
+[[feature]]
+id = "io.endorphin-behaviours"
+title = "Endorphin .nmb behaviour interface + scene behaviour instances / force events (decoded plaintext layers)"
+area = "B"
+tier = "P2"
+status = "partial"
+commands = ["endosim"]
+evidence = [
+  "crates/geo/src/endorphin_behaviour.rs::tests::corpus_instances_match_nmb_interfaces",
+  "crates/geo/src/endorphin_behaviour.rs::tests::nmb_interface_reads_root_params_and_counts_the_network",
+  "crates/geo/src/endorphin_behaviour.rs::tests::instance_params_and_force_events_decode",
+  "crates/geo/src/endorphin_behaviour.rs::tests::hostile_input_returns_none_or_defaults",
+]
+notes = "h46, clean-room from data (oracle/endorphin/NMB.md). DECODED: 47 .nmb names + root parameter interface (type code kg, default ja, UI label de, tooltip gu); 135/135 scene SecondaryBehaviour instances resolve to a .nmb, 1457/1457 labelled params found with the same type, 961 equal defaults; ForceEvent. NOT DECODED: the behaviour networks (cc lo/lt/vw/sd/sb blobs = base64 over a permuted 64-symbol alphabet, alphabet not recovered after 3 attempts) - behaviours must be re-authored (endo-sim). Tag/attribute roles inferred by correlation, original names unknown."

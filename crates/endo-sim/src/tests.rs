@@ -1,4 +1,5 @@
 use super::*;
+use behaviour::Gains;
 use hexe_geo::endorphin::{Document, parse_xml, read_endorphin};
 use std::path::{Path, PathBuf};
 
@@ -103,4 +104,179 @@ fn balcony_standing_characters_fall_monotonically_without_nan() {
         }
     }
     assert_eq!(standing, 1, "character01 only");
+}
+
+fn catch_scene() -> Option<Scene> {
+    let bytes = std::fs::read(resources()?.join("Scenes/Behaviour Scenes/Catch fall2.0.ens")).ok()?;
+    match read_endorphin(&bytes).ok()? {
+        Document::Scene(s) => Some(*s),
+        _ => None,
+    }
+}
+
+const PASSIVE: SimOptions = SimOptions { behaviours: false, forces: false };
+const FORCES_ONLY: SimOptions = SimOptions { behaviours: false, forces: true };
+const ACTIVE: SimOptions = SimOptions { behaviours: true, forces: true };
+
+fn bits(sim: &Sim) -> Vec<u32> {
+    sim.pose()
+        .iter()
+        .flat_map(|c| c.world.iter().flat_map(|x| [x.i, x.j, x.k, x.p].into_iter().flatten().map(f32::to_bits)))
+        .collect()
+}
+
+/// Catch fall scene numbers measured by `run`, printed so a failing bound shows the actual values.
+#[derive(Debug, Default, Clone)]
+struct Run {
+    /// first frame (30 fps) a wrist / the head is below 12 cm, per character
+    hand_t: [Option<usize>; 2],
+    head_t: [Option<usize>; 2],
+    /// mean head height (m) over frames 30..=n
+    head_mean: [f32; 2],
+}
+
+fn run(scene: &Scene, opt: SimOptions, n: usize) -> Run {
+    let mut sim = Sim::from_scene_with(scene, opt);
+    let mut r = Run::default();
+    let mut cnt = 0.0;
+    for f in 0..=n {
+        for (i, c) in ["character01", "character02"].iter().enumerate() {
+            let p = |j: &str| sim.joint_pos(c, j).unwrap();
+            let hand = p("LeftWristJoint")[1].min(p("RightWristJoint")[1]);
+            let head = p("UpperNeckJoint")[1];
+            if hand < 0.12 && r.hand_t[i].is_none() {
+                r.hand_t[i] = Some(f);
+            }
+            if head < 0.12 && r.head_t[i].is_none() {
+                r.head_t[i] = Some(f);
+            }
+            if f >= 30 {
+                r.head_mean[i] += head;
+            }
+        }
+        if f >= 30 {
+            cnt += 1.0;
+        }
+        sim.step(1.0 / 30.0);
+    }
+    r.head_mean = r.head_mean.map(|v| v / cnt);
+    r
+}
+
+#[test]
+fn catch_fall_instances_and_calibration_come_from_the_files() {
+    let Some(scene) = catch_scene() else { return };
+    let sim = Sim::from_scene_with(&scene, ACTIVE);
+    assert_eq!(sim.behaviour_counts(), (2, 2), "two CatchFall controllers, two force events");
+    assert_eq!(Sim::from_scene(&scene).behaviour_counts(), (0, 0));
+    let inst = scene.behaviour_instances();
+    assert_eq!(inst[0].f32("ArmsStrength", 0.0), 0.7);
+    // `Normal` set of the character: shoulder 2000 / 500 / 1000, elbow 1000 / 500 / 1000, neck head 1000 / 500 / 1000
+    let g = behaviour::calibration_gains(&scene.characters[0], behaviour::CALIBRATION);
+    assert_eq!(g.get("LeftShoulderJoint"), Some(&Gains { stiffness: 2000.0, damping: 500.0, force_limit: 1000.0 }));
+    assert_eq!(g.get("RightElbowJoint"), Some(&Gains { stiffness: 1000.0, damping: 500.0, force_limit: 1000.0 }));
+    assert_eq!(g.get("UpperNeckJoint").map(|g| g.stiffness), Some(1000.0));
+    assert!(behaviour::calibration_gains(&scene.characters[0], "NoSuchSet").is_empty());
+}
+
+/// The drive (and only the drive) changes the fall: same scene, same pushes, with vs without the CatchFall controllers.
+/// Measured (30 fps, frames 0..=120): hands touch ground at f16-17 in every run (they hang at shoulder height, so this is
+/// NOT the discriminator); the head touches (< 12 cm) at f25/f33 with only the pushes and at f72/f42 with the drive, and stays
+/// 3x higher on average.
+#[test]
+fn catch_fall_drive_keeps_the_head_off_the_ground_vs_forces_only() {
+    let Some(scene) = catch_scene() else { return };
+    let (p, f, a) = (run(&scene, PASSIVE, 120), run(&scene, FORCES_ONLY, 120), run(&scene, ACTIVE, 120));
+    eprintln!("passive     {p:?}\nforces only {f:?}\nactive      {a:?}");
+    for i in 0..2 {
+        let (fh, ah) = (f.head_t[i].unwrap(), a.head_t[i].unwrap_or(usize::MAX));
+        assert!(ah >= fh + 5, "char {i}: head down at f{ah} (active) vs f{fh} (forces only)");
+        assert!(
+            a.head_mean[i] > 1.8 * f.head_mean[i],
+            "char {i}: mean head height {} vs {}",
+            a.head_mean[i],
+            f.head_mean[i]
+        );
+        // hands arrive before the head in every run, and the margin grows with the drive
+        for r in [&p, &f, &a] {
+            assert!(r.hand_t[i].unwrap() + 8 <= r.head_t[i].unwrap_or(usize::MAX), "char {i}: hand before head: {r:?}");
+        }
+        assert!(a.head_t[i].unwrap_or(usize::MAX) - a.hand_t[i].unwrap() > f.head_t[i].unwrap() - f.hand_t[i].unwrap());
+    }
+}
+
+#[test]
+fn catch_fall_is_deterministic_and_finite() {
+    let Some(scene) = catch_scene() else { return };
+    let go = || {
+        let mut sim = Sim::from_scene_with(&scene, ACTIVE);
+        for _ in 0..90 {
+            sim.step(1.0 / 30.0);
+        }
+        bits(&sim)
+    };
+    let (a, b) = (go(), go());
+    assert_eq!(a, b, "bit-identical across two runs");
+    assert!(a.iter().all(|u| f32::from_bits(*u).is_finite()));
+}
+
+/// Strength 0 switches the motors off: the sim is bit-identical to the pushes-only sim, so the divergence above is the drive.
+#[test]
+fn arms_strength_zero_equals_no_drive() {
+    let Some(mut scene) = catch_scene() else { return };
+    let sb = scene.raw.children.iter_mut().find(|c| c.tag == "SecondaryBehaviours").unwrap();
+    for v in sb
+        .children
+        .iter_mut()
+        .flat_map(|b| b.children.iter_mut())
+        .filter(|n| n.tag == "Parameters")
+        .flat_map(|p| p.children.iter_mut())
+    {
+        if v.attr("fk") == Some("ArmsStrength") {
+            for (k, val) in v.attrs.iter_mut() {
+                if k == "ja" {
+                    *val = "0".into();
+                }
+            }
+        }
+    }
+    let go = |s: &Scene, o| {
+        let mut sim = Sim::from_scene_with(s, o);
+        for _ in 0..60 {
+            sim.step(1.0 / 30.0);
+        }
+        bits(&sim)
+    };
+    assert_eq!(go(&scene, ACTIVE), go(&scene, FORCES_ONLY));
+}
+
+#[test]
+fn behaviours_without_the_arm_chain_or_character_are_ignored() {
+    // MINI has no arms; a CatchFall on it, on a missing character, and an unimplemented behaviour must build nothing
+    let xml = MINI.replace(
+        "</Characters>",
+        "</Characters><SecondaryBehaviours>\
+<SecondaryBehaviour behaviourName=\"Bob2: CatchFall 2.0\" character=\"c\" startFrameNumber=\"0\" endFrameNumber=\"9\"/>\
+<SecondaryBehaviour behaviourName=\"Bob2: CatchFall 2.0\" character=\"nobody\" startFrameNumber=\"0\" endFrameNumber=\"9\"/>\
+<SecondaryBehaviour behaviourName=\"Bob2: Stagger 2.0\" character=\"c\" startFrameNumber=\"0\" endFrameNumber=\"9\"/>\
+</SecondaryBehaviours>",
+    );
+    let s = Scene::from_node(&parse_xml(&xml).unwrap());
+    assert_eq!(s.behaviour_instances().len(), 3);
+    let mut sim = Sim::from_scene_active(&s);
+    assert_eq!(sim.behaviour_counts(), (0, 0));
+    for _ in 0..30 {
+        sim.step(1.0 / 30.0);
+    }
+    assert!(sim.root_y("c").unwrap().is_finite());
+}
+
+#[test]
+fn force_event_maps_direction_and_scale() {
+    use hexe_geo::endorphin_behaviour::ForceEvent;
+    let n = parse_xml("<ForceEvent character=\"a\" brelativeAcceleration=\"3e4ccccd\"><TransformMatrix><Vk bx=\"c1400000\" by=\"0\" bz=\"0\"/></TransformMatrix></ForceEvent>").unwrap();
+    let a = behaviour::force_accel(&ForceEvent::from_node(&n), 10.0);
+    assert!((a.x + 24.0).abs() < 1e-4 && a.y.abs() < 1e-6 && a.z.abs() < 1e-6, "{a:?}");
+    let none = parse_xml("<ForceEvent/>").unwrap();
+    assert_eq!(behaviour::force_accel(&ForceEvent::from_node(&none), 10.0), Vec3::ZERO);
 }

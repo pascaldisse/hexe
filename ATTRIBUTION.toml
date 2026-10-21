@@ -196,3 +196,67 @@ author = "Nyari (paloptic)"
 source = "hexe --render / Hexe.app screenshot; Endorphin sample scene geometry (third-party sample data, rights unclear: proof render only, do not redistribute the scene files)"
 licence = "MIT"
 sha256 = "66d2348237e0e2a36cab624cd1cd5aab2e5041ff8213288e71f394d797227829"
+
+[[asset]]
+path = "proof/h46/active_F1.png"
+title = "h46 endosim Catch fall2.0 render (active_F1)"
+author = "ghoul-sonnet (h46)"
+source = "hexe-tauri --render over file->endosim->blast; Endorphin sample scene geometry (third-party sample data, rights unclear: proof render only, do not redistribute the scene files)"
+licence = "MIT"
+sha256 = "0439e0bfee3b1f8e20c67d0e3914338d17aafcdf26274de2545709b36e448706"
+
+[[asset]]
+path = "proof/h46/active_F30.png"
+title = "h46 endosim Catch fall2.0 render (active_F30)"
+author = "ghoul-sonnet (h46)"
+source = "hexe-tauri --render over file->endosim->blast; Endorphin sample scene geometry (third-party sample data, rights unclear: proof render only, do not redistribute the scene files)"
+licence = "MIT"
+sha256 = "26427facdb5d64ec02011729ff210cb65eabf0c3572b95d1faabc8eaa0a167a8"
+
+[[asset]]
+path = "proof/h46/active_F60.png"
+title = "h46 endosim Catch fall2.0 render (active_F60)"
+author = "ghoul-sonnet (h46)"
+source = "hexe-tauri --render over file->endosim->blast; Endorphin sample scene geometry (third-party sample data, rights unclear: proof render only, do not redistribute the scene files)"
+licence = "MIT"
+sha256 = "7a11e7a8d37376cdc99c3c11582cd335f63f4e1a297c4c858f97d06519ed45f1"
+
+[[asset]]
+path = "proof/h46/active_F90.png"
+title = "h46 endosim Catch fall2.0 render (active_F90)"
+author = "ghoul-sonnet (h46)"
+source = "hexe-tauri --render over file->endosim->blast; Endorphin sample scene geometry (third-party sample data, rights unclear: proof render only, do not redistribute the scene files)"
+licence = "MIT"
+sha256 = "4b6e2d162626997123b57199876081ed86d14528fd4f9893762f45004f71ec8e"
+
+[[asset]]
+path = "proof/h46/passive_F1.png"
+title = "h46 endosim Catch fall2.0 render (passive_F1)"
+author = "ghoul-sonnet (h46)"
+source = "hexe-tauri --render over file->endosim->blast; Endorphin sample scene geometry (third-party sample data, rights unclear: proof render only, do not redistribute the scene files)"
+licence = "MIT"
+sha256 = "0439e0bfee3b1f8e20c67d0e3914338d17aafcdf26274de2545709b36e448706"
+
+[[asset]]
+path = "proof/h46/passive_F30.png"
+title = "h46 endosim Catch fall2.0 render (passive_F30)"
+author = "ghoul-sonnet (h46)"
+source = "hexe-tauri --render over file->endosim->blast; Endorphin sample scene geometry (third-party sample data, rights unclear: proof render only, do not redistribute the scene files)"
+licence = "MIT"
+sha256 = "d515ba7a85484331afd132b535e719b894599d6279efe9be42608224dab7bd76"
+
+[[asset]]
+path = "proof/h46/passive_F60.png"
+title = "h46 endosim Catch fall2.0 render (passive_F60)"
+author = "ghoul-sonnet (h46)"
+source = "hexe-tauri --render over file->endosim->blast; Endorphin sample scene geometry (third-party sample data, rights unclear: proof render only, do not redistribute the scene files)"
+licence = "MIT"
+sha256 = "09d87f3c636035282d8d1df749c8c2c3d634b258d08f1328513b3c7e67a16df4"
+
+[[asset]]
+path = "proof/h46/passive_F90.png"
+title = "h46 endosim Catch fall2.0 render (passive_F90)"
+author = "ghoul-sonnet (h46)"
+source = "hexe-tauri --render over file->endosim->blast; Endorphin sample scene geometry (third-party sample data, rights unclear: proof render only, do not redistribute the scene files)"
+licence = "MIT"
+sha256 = "c2f4b4ab19b00d478d1b82e2d0c93a3bbfc665f17debda1c8d6af5ecd363f915"

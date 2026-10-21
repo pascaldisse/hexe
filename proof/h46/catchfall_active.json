@@ -1,0 +1,1 @@
+{"nodes":[{"name":"endo","type":"file","params":{"file":"/Users/pascaldisse/Downloads/Endorphin 2.5.2 Full Version/PATCH/Resources/Scenes/Behaviour Scenes/Catch fall2.0.ens"}},{"name":"sim","type":"endosim","params":{"behaviours":1}},{"name":"nobg","type":"blast","params":{"group":"char_background"}}],"edges":[["endo",0,"sim",0],["sim",0,"nobg",0]],"display":"nobg"}

@@ -9,7 +9,9 @@
 //! ride their nearest ancestor body at their start-pose offset. The `<Environment>` bodies are static. Ground: scene default
 //! ground = static slab with top at y = 0. Gravity from the scene. Same-character colliders never collide.
 //!
-//! OUT OF SCOPE: behaviours / balance / catch-fall muscles / drives (passive ragdoll only).
+//! `Sim::from_scene` = PASSIVE ragdoll (no behaviours, no force events). `Sim::from_scene_active` adds the behaviour layer
+//! (`behaviour.rs`: `Bob2: CatchFall` joint drives from the scene parameters) and the scene's `<ForceEvent>` pushes.
+//! OUT OF SCOPE: every other behaviour (the `.nmb` networks are not decoded, NMB.md): scene instances of them are ignored.
 #![deny(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -18,9 +20,12 @@
     clippy::todo,
     clippy::unreachable
 )]
+pub mod behaviour;
+use behaviour::{CatchFall, ForceRt, Gains};
 use hexe_geo::endorphin::{Character, Geometry, Joint, Limits, Scene, Xf};
 use rapier3d::glamx::{Mat3, Quat, Vec3};
 use rapier3d::prelude::*;
+use std::collections::HashMap;
 
 /// Largest internal substep (s): `step(dt)` splits `dt` so no substep exceeds it.
 const MAX_SUBSTEP: f32 = 1.0 / 120.0;
@@ -52,16 +57,36 @@ enum Drive {
 
 struct Rig {
     name: String,
+    /// joint names in `Character::joints` order.
+    names: Vec<String>,
+    /// swing gains per joint name from the `behaviour::CALIBRATION` set.
+    gains: HashMap<String, Gains>,
     drives: Vec<Drive>,
     /// Simulated character (false = static environment).
     dynamic: bool,
 }
 
+/// What `Sim::from_scene_with` adds on top of the passive ragdoll.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SimOptions {
+    /// Build the joint-drive controllers of the implemented behaviours (`behaviour.rs`).
+    pub behaviours: bool,
+    /// Apply the scene's `<ForceEvent>` pushes.
+    pub forces: bool,
+}
 /// A running simulation of one scene.
 pub struct Sim {
     world: PhysicsWorld,
     rigs: Vec<Rig>,
     time: f32,
+    catches: Vec<CatchFall>,
+    forces: Vec<ForceRt>,
+}
+
+impl Rig {
+    fn index_of(&self, joint: &str) -> Option<usize> {
+        self.names.iter().position(|n| n == joint)
+    }
 }
 
 fn v3(a: [f32; 3]) -> Vec3 {
@@ -190,6 +215,13 @@ fn owner_joints(c: &Character) -> Vec<Option<usize>> {
 impl Sim {
     /// Build the world from `scene` at its t = 0 pose: characters dynamic, environment + ground static.
     pub fn from_scene(scene: &Scene) -> Sim {
+        Sim::from_scene_with(scene, SimOptions { behaviours: false, forces: false })
+    }
+    /// `from_scene` + behaviours (`behaviour.rs`) + the scene's force events. Same start pose, same determinism.
+    pub fn from_scene_active(scene: &Scene) -> Sim {
+        Sim::from_scene_with(scene, SimOptions { behaviours: true, forces: true })
+    }
+    pub fn from_scene_with(scene: &Scene, opt: SimOptions) -> Sim {
         let mut world = PhysicsWorld::new();
         world.gravity = if scene.gravity.iter().all(|v| v.is_finite()) { v3(scene.gravity) } else { Vec3::Y * -9.81 };
         let mut rigs = Vec::new();
@@ -211,7 +243,42 @@ impl Sim {
                 ));
             world.insert_collider(ground, None);
         }
-        Sim { world, rigs, time: 0.0 }
+        let mut sim = Sim { world, rigs, time: 0.0, catches: Vec::new(), forces: Vec::new() };
+        sim.add_behaviours(scene, opt);
+        sim
+    }
+    fn add_behaviours(&mut self, scene: &Scene, opt: SimOptions) {
+        for inst in scene.behaviour_instances().into_iter().filter(|_| opt.behaviours) {
+            if !inst.enabled || !behaviour::CATCH_FALL.contains(&inst.behaviour.as_str()) {
+                continue;
+            }
+            let Some(ri) = self.rigs.iter().position(|r| r.dynamic && r.name == inst.character) else { continue };
+            if let Some(c) = CatchFall::new(self, ri, &inst) {
+                self.catches.push(c);
+            }
+        }
+        let g = self.world.gravity.length();
+        for ev in scene.force_events().into_iter().filter(|_| opt.forces) {
+            if ev.end <= ev.start {
+                continue;
+            }
+            let accel = behaviour::force_accel(&ev, g);
+            for (ch, body) in &ev.targets {
+                let Some(rig) = self.rigs.iter().find(|r| r.name == *ch) else { continue };
+                // `<Body>Mass` names the MetaBody; its joint is the one whose body that is
+                let Some(ji) = scene
+                    .characters
+                    .iter()
+                    .find(|c| c.name == *ch)
+                    .and_then(|c| c.joints.iter().position(|j| j.body.as_deref() == Some(body.as_str())))
+                else {
+                    continue;
+                };
+                if let Some(Drive::Body(h)) = rig.drives.get(ji) {
+                    self.forces.push(ForceRt { start: ev.start, end: ev.end, body: *h, point: v3(ev.xf.p), accel });
+                }
+            }
+        }
     }
 
     /// Advance by `dt` seconds (split into substeps of at most 1/120 s). Non-positive / non-finite `dt` is a no-op.
@@ -221,7 +288,21 @@ impl Sim {
         }
         let n = ((dt / MAX_SUBSTEP).ceil() as usize).clamp(1, MAX_SUBSTEPS);
         self.world.integration_parameters.dt = dt / n as f32;
-        for _ in 0..n {
+        let sub = dt / n as f32;
+        for k in 0..n {
+            if !(self.catches.is_empty() && self.forces.is_empty()) {
+                let frame = ((self.time + sub * k as f32) * behaviour::FRAME_RATE + 1e-3).floor() as i32;
+                for f in &self.forces {
+                    if f.active_at(frame) {
+                        f.tick(&mut self.world, sub);
+                    }
+                }
+                for c in &mut self.catches {
+                    if c.active_at(frame) {
+                        c.tick(&mut self.world, sub);
+                    }
+                }
+            }
             self.world.step();
         }
         self.time += dt;
@@ -263,6 +344,28 @@ impl Sim {
         }
     }
 
+    /// World matrix of joint `idx` of `rig` right now.
+    fn joint_world(&self, rig: &Rig, idx: usize) -> Option<Xf> {
+        match rig.drives.get(idx)? {
+            Drive::Body(h) => self.world.bodies.get(*h).map(|b| xf_of(b.position())),
+            Drive::Follow { anchor, offset } => Some(self.joint_world(rig, *anchor)?.mul(offset)),
+            Drive::Fixed(x) => Some(*x),
+        }
+    }
+    /// World position of `joint` of `character` (None when unknown).
+    pub fn joint_pos(&self, character: &str, joint: &str) -> Option<[f32; 3]> {
+        let r = self.rigs.iter().find(|r| r.name == character)?;
+        Some(self.joint_world(r, r.index_of(joint)?)?.p)
+    }
+    /// Number of behaviour controllers / force events that were built (0 for a passive sim).
+    pub fn behaviour_counts(&self) -> (usize, usize) {
+        (self.catches.len(), self.forces.len())
+    }
+    /// (urgency, predicted contact time s, ground height) of the first CatchFall on `character`.
+    pub fn catch_fall_state(&self, character: &str) -> Option<(f32, f32, f32)> {
+        let c = self.catches.iter().find(|c| self.rigs.get(c.rig()).is_some_and(|r| r.name == character))?;
+        Some((c.last_urgency, c.last_contact_time, c.last_ground))
+    }
     /// Names of the dynamic (simulated) characters.
     pub fn dynamic_characters(&self) -> Vec<&str> {
         self.rigs.iter().filter(|r| r.dynamic).map(|r| r.name.as_str()).collect()
@@ -367,7 +470,8 @@ fn add_character(world: &mut PhysicsWorld, c: &Character, locals: &[Xf], group: 
             }
         })
         .collect();
-    Rig { name: c.name.clone(), drives, dynamic }
+    let gains = behaviour::calibration_gains(c, behaviour::CALIBRATION);
+    Rig { name: c.name.clone(), names: c.joints.iter().map(|j| j.name.clone()).collect(), gains, drives, dynamic }
 }
 
 #[cfg(test)]

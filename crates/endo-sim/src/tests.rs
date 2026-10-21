@@ -281,3 +281,74 @@ fn force_event_maps_direction_and_scale() {
     let none = parse_xml("<ForceEvent/>").unwrap();
     assert_eq!(behaviour::force_accel(&ForceEvent::from_node(&none), 10.0), Vec3::ZERO);
 }
+
+/// One-body prop character 2 m above a default ground, keyed along +x by the scene timeline
+/// (`<Animation>`), with the physics level of the character given by `inc`.
+fn timeline_scene(inc: &str) -> Scene {
+    let xml = format!(
+        r#"<Scene useDefaultGround="true"><Characters><Character name="p">
+<Skeleton name="root" metaBody="box"><TransformMatrix><Vp x="0" y="2" z="0"/></TransformMatrix></Skeleton>
+<MetaBodies><MetaBody name="box"><CollisionSurface><Geometry type="Cuboid" param0="0.4" param1="0.4" param2="0.4"/></CollisionSurface>
+<InertialBody><Geometry type="Cuboid" param0="0.4" param1="0.4" param2="0.4"/><Inertia density="100"/></InertialBody></MetaBody></MetaBodies>
+</Character></Characters>
+<Events>{inc}</Events>
+<Engine positionBufferFrameRate="60"/>
+<Animation>
+<Channel name="p.root.tx" type="linear"><Key x="0" y="0"/><Key x="2" y="4"/></Channel>
+<Channel name="p.root.ty" type="linear"><Key x="0" y="2"/><Key x="2" y="2"/></Channel>
+</Animation></Scene>"#
+    );
+    Scene::from_node(&parse_xml(&xml).unwrap())
+}
+
+fn run_to(s: &Scene, frames: usize) -> [f32; 3] {
+    let mut sim = Sim::from_scene_with(s, PLAY);
+    for _ in 0..frames {
+        sim.step(1.0 / 30.0);
+    }
+    sim.joint_pos("p", "root").unwrap()
+}
+
+#[test]
+fn scene_timeline_drives_a_character_that_never_becomes_full_physics() {
+    // CollisionOnly from frame 0 and no FullPhysics event: Endorphin plays the timeline, the body never falls
+    let s = timeline_scene(r#"<IncarnationEvent character="p" physicsLevel="CollisionOnly" startFrameNumber="0"/>"#);
+    // 30 sim frames = 1 s = ens frame 60 of 120: half way along the keyed +x ramp, still at its keyed height
+    let p = run_to(&s, 30);
+    assert!((p[0] - 2.0).abs() < 0.1, "timeline x: {p:?}");
+    assert!((p[1] - 2.0).abs() < 0.05, "timeline y: {p:?}");
+    // no incarnation event = a ragdoll from frame 0: the same scene falls onto the ground and ignores the timeline
+    let q = run_to(&timeline_scene(""), 30);
+    assert!(q[1] < 1.0 && q[0].abs() < 0.1, "free fall: {q:?}");
+}
+
+#[test]
+fn timeline_hands_over_to_physics_at_the_full_physics_frame() {
+    // kinematic until ens frame 30 (= sim frame 15), then a ragdoll with the clip's own velocity
+    let s = timeline_scene(
+        r#"<IncarnationEvent character="p" physicsLevel="NoPhysics" startFrameNumber="0"/><IncarnationEvent character="p" physicsLevel="FullPhysics" startFrameNumber="30"/>"#,
+    );
+    let at15 = run_to(&s, 15);
+    assert!((at15[1] - 2.0).abs() < 0.05, "still driven at the switch: {at15:?}");
+    let at45 = run_to(&s, 45);
+    assert!(at45[1] < 1.5, "falls after the switch: {at45:?}");
+    // the handover keeps the timeline velocity (2 m/s along +x): it keeps travelling past the keyed 1 m of 0.5 s
+    assert!(at45[0] > 1.5, "keeps the timeline velocity: {at45:?}");
+}
+
+#[test]
+fn car_hit_car_follows_its_authored_timeline_instead_of_falling() {
+    let Some(res) = resources() else { return };
+    let bytes = std::fs::read(res.join("Scenes/Sample Scenes/Car Hit.ens")).unwrap();
+    let Document::Scene(s) = read_endorphin(&bytes).unwrap() else { panic!("not a scene") };
+    let mut sim = Sim::from_scene_play(&s);
+    let y0 = sim.joint_pos("prop02", "root").unwrap()[1];
+    let mut hit = 0usize;
+    for _ in 0..90 {
+        sim.step(1.0 / 30.0);
+        hit += sim.contacts_of("character01").len();
+    }
+    let p = sim.joint_pos("prop02", "root").unwrap();
+    assert!((p[1] - y0).abs() < 0.2, "the car keeps its authored height: {p:?} vs {y0}");
+    assert!(p[2].is_finite() && hit > 0, "the car reaches the character: contacts {hit}");
+}

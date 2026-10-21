@@ -2,7 +2,9 @@
 //! every 30 sim frames (1/30 s steps; NB the .ens timeline runs at positionBufferFrameRate, 60 fps in Balcony: ens frame = 2 x sim frame).
 use endo_sim::Sim;
 use hexe_geo::endorphin::{Document, Scene, read_endorphin};
-fn metrics(s: &Scene, sim: &Sim) -> Vec<(String, f32, f32)> {
+/// Per-character metric row of one mark: `(name, head height m, COM-over-feet m)`.
+type Row = Vec<(String, f32, f32)>;
+fn metrics(s: &Scene, sim: &Sim) -> Row {
     let pose = sim.pose();
     let mut out = vec![];
     for c in &s.characters {
@@ -22,22 +24,35 @@ fn main() {
     let Document::Scene(s) = read_endorphin(&std::fs::read(&a[1]).unwrap()).unwrap() else { return };
     let last: usize = a.get(2).and_then(|v| v.parse().ok()).unwrap_or(300);
     let marks: Vec<usize> = std::iter::once(1).chain((30..=last).step_by(30)).collect();
-    let mut rows: Vec<(String, Vec<Vec<(String, f32, f32)>>)> = vec![];
+    let mut rows: Vec<(String, Vec<Row>)> = vec![];
     let mut diag = String::new();
     for (label, passive) in [("passive", true), ("behaviours", false)] {
         let mut sim = if passive { Sim::from_scene(&s) } else { Sim::from_scene_play(&s) };
         let mut v = vec![];
         for f in 1..=last {
-            if f > 1 { sim.step(1.0 / 30.0); }
+            if f > 1 {
+                sim.step(1.0 / 30.0);
+            }
             if marks.contains(&f) {
                 let m = metrics(&s, &sim);
                 if !passive {
                     for (n, h, _) in &m {
                         if let Some(b) = sim.behaviour_state(n) {
-                            let h0 = v.first().and_then(|r: &Vec<(String, f32, f32)>| r.iter().find(|x| &x.0 == n)).map_or(*h, |x| x.1);
+                            let h0 = v
+                                .first()
+                                .and_then(|r: &Vec<(String, f32, f32)>| r.iter().find(|x| &x.0 == n))
+                                .map_or(*h, |x| x.1);
                             diag.push_str(&format!(
                                 "| {n} | {f} | {:.0} | {:.0}% | {} | {:.2} | {:.2} | {:.2} | {:.2} | {:.2} | {} |\n",
-                                f as f32 * 2.0, h / h0 * 100.0, b.standing, b.hold, b.cop_demand, b.fall, b.com_offset, b.tilt, b.active.join("+")
+                                f as f32 * 2.0,
+                                h / h0 * 100.0,
+                                b.standing,
+                                b.hold,
+                                b.cop_demand,
+                                b.fall,
+                                b.com_offset,
+                                b.tilt,
+                                b.active.join("+")
                             ));
                         }
                     }
@@ -57,6 +72,8 @@ fn main() {
             }
         }
     }
-    println!("\n| char | f | ens frame | head/start | standing | hold | COP demand/budget | fall | bal err m | tilt rad | active |");
+    println!(
+        "\n| char | f | ens frame | head/start | standing | hold | COP demand/budget | fall | bal err m | tilt rad | active |"
+    );
     print!("{diag}");
 }

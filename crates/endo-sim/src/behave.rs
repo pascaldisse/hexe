@@ -677,7 +677,7 @@ impl Ctl {
     }
     /// Last `DesiredPoseEvent` covering `fr` (file order = priority order).
     fn pose_event(&self, fr: f32) -> Option<&PoseTarget> {
-        self.poses.iter().filter(|p| fr >= p.start && fr <= p.end).next_back()
+        self.poses.iter().rfind(|p| fr >= p.start && fr <= p.end)
     }
     /// Clip (`AnimationEvent`) covering `fr` and the sampled index in it: the last enabled event wins.
     fn track_at(&self, fr: f32) -> Option<(&Track, usize)> {
@@ -704,7 +704,7 @@ impl Ctl {
     }
     /// Drive the bodies kinematically from the clip while the character is not yet a full-physics ragdoll.
     /// Returns true when the controller must stand down this substep (the clip owns the body).
-    fn drive_kinematic(&mut self, w: &mut PhysicsWorld, fr: f32, dt: f32) -> bool {
+    fn drive_kinematic(&mut self, w: &mut PhysicsWorld, fr: f32) -> bool {
         let Some(switch) = self.switch else { return false };
         if !self.init {
             self.init = true;
@@ -718,8 +718,9 @@ impl Ctl {
         if fr >= switch {
             if self.kinematic {
                 self.kinematic = false;
-                // hand over to the solver with the clip's own velocity (finite difference over one substep)
-                let prev = self.kin_at((fr - dt * self.fps).max(0.0));
+                // hand over to the solver with the clip's own velocity (finite difference over one ens frame:
+                // the pre-sampled poses are per frame, a substep difference would read the same index twice = zero)
+                let prev = self.kin_at((fr - 1.0).max(0.0));
                 for (k, j) in self.jcs.iter().enumerate() {
                     let (now, before) = (
                         self.kin_at(fr).and_then(|(t, i)| t.worlds.get(i).and_then(|v| v.get(k)).copied()),
@@ -728,7 +729,7 @@ impl Ctl {
                     if let Some(b) = w.bodies.get_mut(j.body) {
                         b.set_body_type(RigidBodyType::Dynamic, true);
                         if let (Some(a), Some(c)) = (now, before) {
-                            let v = (v3(a.p) - v3(c.p)) / dt.max(1e-4);
+                            let v = (v3(a.p) - v3(c.p)) * self.fps;
                             if v.is_finite() && v.length() < 50.0 {
                                 b.set_linvel(v, true);
                             }
@@ -739,7 +740,8 @@ impl Ctl {
             return false;
         }
         let Some((t, i)) = self.kin_at(fr) else { return true };
-        let poses: Vec<Option<crate::Xf>> = (0..self.jcs.len()).map(|k| t.worlds.get(i).and_then(|v| v.get(k)).copied()).collect();
+        let poses: Vec<Option<crate::Xf>> =
+            (0..self.jcs.len()).map(|k| t.worlds.get(i).and_then(|v| v.get(k)).copied()).collect();
         for (k, j) in self.jcs.iter().enumerate() {
             let Some(Some(x)) = poses.get(k) else { continue };
             if let Some(b) = w.bodies.get_mut(j.body) {
@@ -749,9 +751,8 @@ impl Ctl {
         true
     }
 
-
     fn apply(&mut self, w: &mut PhysicsWorld, fr: f32, t: f32, dt: f32) {
-        if self.drive_kinematic(w, fr, dt) {
+        if self.drive_kinematic(w, fr) {
             return;
         }
         let Some(st) = self.snapshot(w) else { return };
@@ -831,10 +832,10 @@ impl Ctl {
                 if sm > 0.0 { horiz(sv / sm) } else { Vec3::ZERO }
             };
             let centre = {
- let f: Vec<Vec3> = self.feet.iter().filter_map(|k| st.get(*k)).map(|s| horiz(s.pos)).collect();
- if f.is_empty() { Vec3::ZERO } else { f.iter().fold(Vec3::ZERO, |a, p| a + *p) / f.len() as f32 }
-};
-let ec = if self.feet.is_empty() { e } else { horiz(com) - centre };
+                let f: Vec<Vec3> = self.feet.iter().filter_map(|k| st.get(*k)).map(|s| horiz(s.pos)).collect();
+                if f.is_empty() { Vec3::ZERO } else { f.iter().fold(Vec3::ZERO, |a, p| a + *p) / f.len() as f32 }
+            };
+            let ec = if self.feet.is_empty() { e } else { horiz(com) - centre };
             let w = -(ec * LEAN_KP + vh * LEAN_KD);
             let w = if w.length() > LEAN_MAX { w.normalize_or_zero() * LEAN_MAX } else { w };
             Vec3::Y.cross(w) * (1.0 - fall)
@@ -855,7 +856,7 @@ let ec = if self.feet.is_empty() { e } else { horiz(com) - centre };
                         && self.standing
                         && let Some(c) = st.get(k)
                     {
-                        q = q * Quat::from_scaled_axis(c.rot.inverse() * -lean_axis);
+                        q *= Quat::from_scaled_axis(c.rot.inverse() * -lean_axis);
                     }
                     let k = if j.left { legs[0] } else { legs[1] };
                     if k > 0.0 {
@@ -939,7 +940,7 @@ let ec = if self.feet.is_empty() { e } else { horiz(com) - centre };
                 for (axis, v) in [(JointAxis::AngX, qt.x), (JointAxis::AngY, qt.y), (JointAxis::AngZ, qt.z)] {
                     jt.data.set_motor_model(axis, MotorModel::ForceBased);
                     jt.data.set_motor_position(axis, ang(v), stiff, damp);
-jt.data.set_motor_max_force(axis, tau_max);
+                    jt.data.set_motor_max_force(axis, tau_max);
                 }
             }
         }

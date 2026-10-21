@@ -7,16 +7,25 @@ use hexe_geo::endorphin::{Document, read_endorphin};
 
 fn main() {
     let a: Vec<String> = std::env::args().collect();
-    let Some(path) = a.get(1) else { eprintln!("usage: corpus scene.ens [frames]"); std::process::exit(64) };
+    let Some(path) = a.get(1) else {
+        eprintln!("usage: corpus scene.ens [frames]");
+        std::process::exit(64)
+    };
     let frames: usize = a.get(2).and_then(|v| v.parse().ok()).unwrap_or(300);
     let name = std::path::Path::new(path).file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
     let bytes = match std::fs::read(path) {
         Ok(b) => b,
-        Err(e) => { println!("{name}\t-\t-\t-\t-\t-\t-\t0\t-\t-\t-\t-\tREAD_ERR {e}"); std::process::exit(2) }
+        Err(e) => {
+            println!("{name}\t-\t-\t-\t-\t-\t-\t0\t-\t-\t-\t-\tREAD_ERR {e}");
+            std::process::exit(2)
+        }
     };
     let doc = match read_endorphin(&bytes) {
         Ok(d) => d,
-        Err(e) => { println!("{name}\t-\t-\t-\t-\t-\t-\t0\t-\t-\t-\t-\tPARSE_ERR {e}"); std::process::exit(2) }
+        Err(e) => {
+            println!("{name}\t-\t-\t-\t-\t-\t-\t0\t-\t-\t-\t-\tPARSE_ERR {e}");
+            std::process::exit(2)
+        }
     };
     let Document::Scene(s) = doc else {
         println!("{name}\t-\t-\t-\t-\t-\t-\t0\t-\t-\t-\t-\tNOT_A_SCENE");
@@ -82,7 +91,11 @@ fn main() {
     let fmt = |v: [f32; 3]| format!("({:.2},{:.2},{:.2})", v[0], v[1], v[2]);
     let c0 = s.characters.first();
     let root = c0
-        .and_then(|c| pose.iter().find(|p| p.name == c.name).and_then(|p| c.joints.iter().position(|j| j.name == "root").map(|i| p.world[i].p)))
+        .and_then(|c| {
+            pose.iter()
+                .find(|p| p.name == c.name)
+                .and_then(|p| c.joints.iter().position(|j| j.name == "root").map(|i| p.world[i].p))
+        })
         .map(fmt)
         .unwrap_or("-".into());
     let head = c0

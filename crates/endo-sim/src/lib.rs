@@ -20,21 +20,33 @@
     clippy::todo,
     clippy::unreachable
 )]
+mod behave;
 pub mod behaviour;
+pub use behave::BehaviourState;
 use behaviour::{CatchFall, ForceRt, Gains};
 use hexe_geo::endorphin::{Character, Geometry, Joint, Limits, Scene, Xf};
 use rapier3d::glamx::{Mat3, Quat, Vec3};
 use rapier3d::prelude::*;
 use std::collections::HashMap;
 
-/// Largest internal substep (s): `step(dt)` splits `dt` so no substep exceeds it.
+/// Largest internal substep (s) of a passive / CatchFall-only sim: `step(dt)` splits `dt` so no substep exceeds it.
 const MAX_SUBSTEP: f32 = 1.0 / 120.0;
-const MAX_SUBSTEPS: usize = 64;
+/// Largest internal substep (s) with the `secondary` layer on: the joint motors need the shorter step to stay stable.
+const MAX_SUBSTEP_PLAY: f32 = 1.0 / 240.0;
+const MAX_SUBSTEPS: usize = 128;
+/// Solver iterations with the `secondary` layer on (rapier's default of 1 lets the motor chains sag).
+const PLAY_SOLVER_ITERS: usize = 4;
 /// Density for bodies whose mass the file does not give (water-ish, like a body).
 const FALLBACK_DENSITY: f32 = 1000.0;
 const MIN_MASS: f32 = 0.05;
 /// Placeholder half extents of unknown (`File`/`Mesh`) geometry: the 5 cm box `endorphin_geo` draws.
 const PLACEHOLDER_HALF: [f32; 3] = [0.025; 3];
+/// `.ens` densities are g/cm^3 (Head 4.55 ... limbs 1.5): kg/m^3 = x 1000. Only the `secondary` build uses them scaled;
+/// the h44/h46 builds keep the unscaled (clamped, near-uniform) masses so their measured numbers stand.
+const DENSITY_SCALE: f32 = 1000.0;
+/// Mass compression of the `secondary` build: `m -> MASS_REF (m / MASS_REF)^MASS_EXP` (heavy torso vs light hands servo alike).
+const MASS_REF: f32 = 5.0;
+const MASS_EXP: f32 = 0.5;
 /// Collision group of everything that is not a character (environment, ground).
 const WORLD_GROUP: u32 = 1 << 31;
 
@@ -62,6 +74,14 @@ struct Rig {
     /// swing gains per joint name from the `behaviour::CALIBRATION` set.
     gains: HashMap<String, Gains>,
     drives: Vec<Drive>,
+    /// Per joint: the rigid body it owns.
+    handles: Vec<Option<RigidBodyHandle>>,
+    /// Per joint: its spherical (limited) impulse joint to the anchor body.
+    jhandles: Vec<Option<ImpulseJointHandle>>,
+    /// Per joint: nearest ancestor-or-self joint that owns a body.
+    anchor: Vec<Option<usize>>,
+    /// Per joint: start-pose world matrix (placement included).
+    rest: Vec<Xf>,
     /// Simulated character (false = static environment).
     dynamic: bool,
 }
@@ -73,6 +93,9 @@ pub struct SimOptions {
     pub behaviours: bool,
     /// Apply the scene's `<ForceEvent>` pushes.
     pub forces: bool,
+    /// Build the pose-hold / balance / secondary-behaviour layer (`behave.rs`: Stagger, Arms Windmill, Legs Straighten, brace).
+    /// Also switches the build to scaled masses, rigid minor joints, flat soles and the shorter substep.
+    pub secondary: bool,
 }
 /// A running simulation of one scene.
 pub struct Sim {
@@ -81,6 +104,8 @@ pub struct Sim {
     time: f32,
     catches: Vec<CatchFall>,
     forces: Vec<ForceRt>,
+    behave: Option<behave::Behave>,
+    max_substep: f32,
 }
 
 impl Rig {
@@ -89,7 +114,7 @@ impl Rig {
     }
 }
 
-fn v3(a: [f32; 3]) -> Vec3 {
+pub(crate) fn v3(a: [f32; 3]) -> Vec3 {
     Vec3::new(a[0], a[1], a[2])
 }
 
@@ -106,7 +131,7 @@ fn finite(x: &Xf) -> bool {
 }
 
 /// Rotation of the basis (orthonormalised through the quaternion).
-fn quat_of(x: &Xf) -> Quat {
+pub(crate) fn quat_of(x: &Xf) -> Quat {
     let q = Quat::from_mat3(&mat3(x));
     if q.is_finite() && q.length_squared() > 1e-12 { q.normalize() } else { Quat::IDENTITY }
 }
@@ -120,7 +145,7 @@ fn xf_of(p: &Pose) -> Xf {
 }
 
 /// General affine inverse (identity when singular, so hostile matrices never poison the pose).
-fn inverse(x: &Xf) -> Xf {
+pub(crate) fn inverse(x: &Xf) -> Xf {
     let m = mat3(x);
     let mi = m.inverse();
     let xi = xf_from(&mi, -(mi * v3(x.p)));
@@ -188,6 +213,12 @@ fn limits_of(j: &Joint) -> Option<Limits> {
     j.hard.or(j.soft).filter(|l| l.twist > 0.0 || l.swing1 > 0.0 || l.swing2 > 0.0)
 }
 
+/// Joints locked rigid in the `secondary` build (trunk, neck, clavicles, wrists, fingers, forearm twist, mid-foot, toes):
+/// their tiny segments are too light to servo stably, so the trunk and each hand / foot act as one rigid body.
+fn is_minor(name: &str) -> bool {
+    ["Spine", "Neck", "Clavicle", "Wrist", "Fingers", "ForearmTwist", "MidFoot", "Toes"].iter().any(|k| name.contains(k))
+}
+
 fn owner_joints(c: &Character) -> Vec<Option<usize>> {
     // body name -> first non-virtual-muscle joint that names it (else the first joint at all)
     let mut owner: Vec<Option<usize>> = vec![None; c.joints.len()];
@@ -215,11 +246,16 @@ fn owner_joints(c: &Character) -> Vec<Option<usize>> {
 impl Sim {
     /// Build the world from `scene` at its t = 0 pose: characters dynamic, environment + ground static.
     pub fn from_scene(scene: &Scene) -> Sim {
-        Sim::from_scene_with(scene, SimOptions { behaviours: false, forces: false })
+        Sim::from_scene_with(scene, SimOptions { behaviours: false, forces: false, secondary: false })
     }
-    /// `from_scene` + behaviours (`behaviour.rs`) + the scene's force events. Same start pose, same determinism.
+    /// `from_scene` + the CatchFall drives (`behaviour.rs`) + the scene's force events. Same start pose, same determinism.
     pub fn from_scene_active(scene: &Scene) -> Sim {
-        Sim::from_scene_with(scene, SimOptions { behaviours: true, forces: true })
+        Sim::from_scene_with(scene, SimOptions { behaviours: true, forces: true, secondary: false })
+    }
+    /// PLAY mode (h47): everything the crate simulates — CatchFall drives, force events and the `behave.rs` layer
+    /// (pose hold, balance, Stagger / Arms Windmill / Legs Straighten, brace).
+    pub fn from_scene_play(scene: &Scene) -> Sim {
+        Sim::from_scene_with(scene, SimOptions { behaviours: true, forces: true, secondary: true })
     }
     pub fn from_scene_with(scene: &Scene, opt: SimOptions) -> Sim {
         let mut world = PhysicsWorld::new();
@@ -227,10 +263,10 @@ impl Sim {
         let mut rigs = Vec::new();
         for (i, c) in scene.characters.iter().enumerate() {
             let group = 1u32 << (i % 30);
-            rigs.push(add_character(&mut world, c, &scene.posed_locals(c, 0.0), group, true));
+            rigs.push(add_character(&mut world, c, &scene.posed_locals(c, 0.0), group, true, opt.secondary));
         }
         if let Some(e) = &scene.environment {
-            rigs.push(add_character(&mut world, e, &scene.posed_locals(e, 0.0), WORLD_GROUP, false));
+            rigs.push(add_character(&mut world, e, &scene.posed_locals(e, 0.0), WORLD_GROUP, false, false));
         }
         if scene.use_default_ground {
             let ground = ColliderBuilder::cuboid(100.0, 0.5, 100.0)
@@ -243,8 +279,14 @@ impl Sim {
                 ));
             world.insert_collider(ground, None);
         }
-        let mut sim = Sim { world, rigs, time: 0.0, catches: Vec::new(), forces: Vec::new() };
+        let max_substep = if opt.secondary { MAX_SUBSTEP_PLAY } else { MAX_SUBSTEP };
+        let mut sim =
+            Sim { world, rigs, time: 0.0, catches: Vec::new(), forces: Vec::new(), behave: None, max_substep };
         sim.add_behaviours(scene, opt);
+        if opt.secondary {
+            sim.world.integration_parameters.num_solver_iterations = PLAY_SOLVER_ITERS;
+            sim.behave = Some(behave::Behave::build(scene, &sim.rigs, &sim.world));
+        }
         sim
     }
     fn add_behaviours(&mut self, scene: &Scene, opt: SimOptions) {
@@ -286,10 +328,13 @@ impl Sim {
         if !(dt.is_finite() && dt > 0.0) {
             return;
         }
-        let n = ((dt / MAX_SUBSTEP).ceil() as usize).clamp(1, MAX_SUBSTEPS);
+        let n = ((dt / self.max_substep).ceil() as usize).clamp(1, MAX_SUBSTEPS);
         self.world.integration_parameters.dt = dt / n as f32;
         let sub = dt / n as f32;
         for k in 0..n {
+            if let Some(b) = self.behave.as_mut() {
+                b.apply(&mut self.world, self.time + sub * k as f32, sub);
+            }
             if !(self.catches.is_empty() && self.forces.is_empty()) {
                 let frame = ((self.time + sub * k as f32) * behaviour::FRAME_RATE + 1e-3).floor() as i32;
                 for f in &self.forces {
@@ -366,6 +411,43 @@ impl Sim {
         let c = self.catches.iter().find(|c| self.rigs.get(c.rig()).is_some_and(|r| r.name == character))?;
         Some((c.last_urgency, c.last_contact_time, c.last_ground))
     }
+    /// Live `behave.rs` diagnostics of a character (`None`: no secondary layer / unknown name).
+    pub fn behaviour_state(&self, character: &str) -> Option<BehaviourState> {
+        self.behave.as_ref()?.state(character)
+    }
+    /// Drop every scheduled `<ForceEvent>` push (A/B proofs: with vs without the gun shot).
+    pub fn disable_force_events(&mut self) {
+        self.forces.clear();
+    }
+    /// Diagnostics: bodies of `character` touching something else, as `(own joint index, other rig name, other joint index, normal impulse)`.
+    pub fn contacts_of(&self, character: &str) -> Vec<(usize, String, Option<usize>, f32)> {
+        let owner = |h: RigidBodyHandle| -> Option<(usize, usize)> {
+            self.rigs
+                .iter()
+                .enumerate()
+                .find_map(|(ri, r)| r.handles.iter().position(|x| *x == Some(h)).map(|j| (ri, j)))
+        };
+        let mut out = Vec::new();
+        for cp in self.world.narrow_phase.contact_pairs() {
+            let imp: f32 = cp.manifolds.iter().flat_map(|m| m.points.iter()).map(|p| p.data.impulse).sum();
+            if imp <= 0.0 {
+                continue;
+            }
+            let parent = |c: ColliderHandle| self.world.colliders.get(c).and_then(|c| c.parent());
+            let (a, b) = (parent(cp.collider1).and_then(owner), parent(cp.collider2).and_then(owner));
+            for (me, other) in [(a, b), (b, a)] {
+                if let Some((ri, j)) = me
+                    && self.rigs.get(ri).is_some_and(|r| r.name == character)
+                {
+                    let on = other
+                        .and_then(|(oi, _)| self.rigs.get(oi).map(|r| r.name.clone()))
+                        .unwrap_or_else(|| "ground".to_string());
+                    out.push((j, on, other.map(|(_, oj)| oj), imp));
+                }
+            }
+        }
+        out
+    }
     /// Names of the dynamic (simulated) characters.
     pub fn dynamic_characters(&self) -> Vec<&str> {
         self.rigs.iter().filter(|r| r.dynamic).map(|r| r.name.as_str()).collect()
@@ -377,7 +459,14 @@ impl Sim {
     }
 }
 
-fn add_character(world: &mut PhysicsWorld, c: &Character, locals: &[Xf], group: u32, dynamic: bool) -> Rig {
+fn add_character(
+    world: &mut PhysicsWorld,
+    c: &Character,
+    locals: &[Xf],
+    group: u32,
+    dynamic: bool,
+    rigid_minor: bool,
+) -> Rig {
     // start-pose world matrices incl. the scene placement
     let rest: Vec<Xf> = c.world_of(locals).iter().map(|x| c.xf.mul(x)).collect();
     let owner = owner_joints(c);
@@ -387,6 +476,7 @@ fn add_character(world: &mut PhysicsWorld, c: &Character, locals: &[Xf], group: 
         InteractionTestMode::And,
     );
     let mut handles: Vec<Option<RigidBodyHandle>> = vec![None; c.joints.len()];
+    let mut jhandles: Vec<Option<ImpulseJointHandle>> = vec![None; c.joints.len()];
     for (i, j) in c.joints.iter().enumerate() {
         if owner.get(i).copied().flatten() != Some(i) {
             continue;
@@ -401,13 +491,25 @@ fn add_character(world: &mut PhysicsWorld, c: &Character, locals: &[Xf], group: 
             .iter()
             .filter_map(|cs| cs.geom.as_ref().map(|g| (shape_of(g), body.xf.mul(&cs.xf))))
             .collect();
+        // play mode: the foot keeps its inertial box (a flat sole) instead of the collision capsules, so it does not roll
+        if rigid_minor
+            && ["Heel", "Foot", "Toes"].iter().any(|k| body.name.contains(k))
+            && let Some(g) = &body.inertial
+        {
+            shapes = vec![(shape_of(g), body.xf)];
+        }
         if shapes.is_empty()
             && let Some(g) = &body.inertial
         {
             shapes.push((shape_of(g), body.xf));
         }
         let vol: f32 = shapes.iter().map(|(s, _)| s.volume).sum();
-        let mass = body.mass().filter(|m| m.is_finite() && *m > 0.0).unwrap_or(vol * FALLBACK_DENSITY).max(MIN_MASS);
+        let mass = body
+            .mass()
+            .map(|m| if rigid_minor { MASS_REF * (m * DENSITY_SCALE / MASS_REF).powf(MASS_EXP) } else { m })
+            .filter(|m| m.is_finite() && *m > 0.0)
+            .unwrap_or(vol * FALLBACK_DENSITY)
+            .max(MIN_MASS);
         for (s, local) in shapes {
             let share = if vol > 0.0 { s.volume / vol } else { 1.0 };
             let at = Pose::from_parts(v3(local.p), quat_of(&local) * s.rot);
@@ -438,7 +540,9 @@ fn add_character(world: &mut PhysicsWorld, c: &Character, locals: &[Xf], group: 
             let rel = inverse(wa).mul(wj);
             let f1 = Pose::from_parts(v3(rel.p), quat_of(&rel));
             let f2 = Pose::IDENTITY;
-            let joint: GenericJoint = match limits_of(j) {
+            let lim = limits_of(j).filter(|_| !(rigid_minor && is_minor(&j.name)));
+            let spherical = lim.is_some();
+            let joint: GenericJoint = match lim {
                 Some(l) => SphericalJointBuilder::new()
                     .local_frame1(f1)
                     .local_frame2(f2)
@@ -452,7 +556,10 @@ fn add_character(world: &mut PhysicsWorld, c: &Character, locals: &[Xf], group: 
                     FixedJointBuilder::new().local_frame1(f1).local_frame2(f2).contacts_enabled(false).build().into()
                 }
             };
-            world.insert_impulse_joint(*ra, *rb, joint);
+            let jh = world.insert_impulse_joint(*ra, *rb, joint);
+            if spherical && let Some(slot) = jhandles.get_mut(i) {
+                *slot = Some(jh);
+            }
         }
     }
     let drives = c
@@ -471,7 +578,17 @@ fn add_character(world: &mut PhysicsWorld, c: &Character, locals: &[Xf], group: 
         })
         .collect();
     let gains = behaviour::calibration_gains(c, behaviour::CALIBRATION);
-    Rig { name: c.name.clone(), names: c.joints.iter().map(|j| j.name.clone()).collect(), gains, drives, dynamic }
+    Rig {
+        name: c.name.clone(),
+        names: c.joints.iter().map(|j| j.name.clone()).collect(),
+        gains,
+        drives,
+        handles,
+        jhandles,
+        anchor,
+        rest,
+        dynamic,
+    }
 }
 
 #[cfg(test)]

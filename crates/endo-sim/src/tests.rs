@@ -114,9 +114,10 @@ fn catch_scene() -> Option<Scene> {
     }
 }
 
-const PASSIVE: SimOptions = SimOptions { behaviours: false, forces: false };
-const FORCES_ONLY: SimOptions = SimOptions { behaviours: false, forces: true };
-const ACTIVE: SimOptions = SimOptions { behaviours: true, forces: true };
+const PASSIVE: SimOptions = SimOptions { behaviours: false, forces: false, secondary: false };
+const FORCES_ONLY: SimOptions = SimOptions { behaviours: false, forces: true, secondary: false };
+const ACTIVE: SimOptions = SimOptions { behaviours: true, forces: true, secondary: false };
+const PLAY: SimOptions = SimOptions { behaviours: true, forces: true, secondary: true };
 
 fn bits(sim: &Sim) -> Vec<u32> {
     sim.pose()

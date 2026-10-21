@@ -21,8 +21,9 @@
 //! "per full curve by edges" on a one-point curve divides 0 by 0 and Houdini writes NaN frames.
 //! Point outputs average the vertices of the point, walked newest first (unit directions with sign alignment, mean
 //! length; quaternions with sign alignment; matrices by polar decomposition). Quaternions: trace >= 0 takes the w branch.
-//! UNVERIFIED: `upvectoratstart` off when the target up lies in a planar curve's plane (the average solve is a sign
-//! knife-edge decided by ~1e-17 roundoff; the recorded `x_avg` case leaves that curve out).
+//! `upvectoratstart` off when the target up lies in a planar curve's plane is a sign knife-edge (the projection is 0
+//! in exact arithmetic, +-1e-16 here): values inside `SIGN_EPS_REL` of zero take Houdini's `>= 0` branch, so the
+//! recorded `y_avg` case matches on any FPU instead of depending on the last roundoff bit.
 //!
 //! Not modelled (-> `Unsupported`): `adjustupcurvature` (curvature attribute features), `transformbyattribs` when the input
 //! carries instance attributes (N, up, pscale, scale, rot, orient, pivot, trans, transform), non-polygon prims (NURBS /
@@ -40,6 +41,8 @@ const INPUTS: [InputSpec; 1] = [InputSpec { name: "input0" }];
 const EXTREMELY_SMALL_L2: f64 = 1e-37;
 const QUITE_SMALL_REL: f64 = 1e-5;
 const QUITE_SMALL_REL2: f64 = 1e-10;
+/// Relative zero for the average-up sign solve (see the module note): |projection| below this counts as 0.
+const SIGN_EPS_REL: f64 = 1e-12;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Tangent {
@@ -660,9 +663,11 @@ fn backbone(
             (s * k, c * k)
         }
     } else if mxmx > mymy {
-        (if mxup >= 0.0 { 1.0 } else { -1.0 }, 0.0)
+        // sign knife-edge: when the target up lies in a planar curve's plane the projection is zero in exact
+        // arithmetic and +-1e-16 noise here, so anything inside the relative epsilon takes Houdini's `>= 0` branch
+        (if mxup >= -SIGN_EPS_REL * mxmx.sqrt() { 1.0 } else { -1.0 }, 0.0)
     } else {
-        (0.0, if myup >= 0.0 { 1.0 } else { -1.0 })
+        (0.0, if myup >= -SIGN_EPS_REL * mymy.sqrt() { 1.0 } else { -1.0 })
     };
     for i in 0..npoints {
         let b = cross(f.ups[i], f.tangents[i]);

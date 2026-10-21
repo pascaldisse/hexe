@@ -720,8 +720,9 @@ mod tests {
         assert!(Arc::ptr_eq(&n.cook(&ctx, std::slice::from_ref(&a)).expect("cooks"), &a));
     }
 
-    /// Stiffen Features keeps a feature line: a flat 9x9 grid (no shape, so plain QEM collapses anywhere) with the middle
-    /// row's 8 edges as features at weight 100 keeps every surviving point that touches the row ON the row.
+    /// Stiffen Features keeps a feature line: a gently waved 9x9 grid with the middle row's 8 edges as the feature
+    /// group; at weight 100 the points near that row drift off it >4x less than at weight 0 (= features off; input 2
+    /// stays wired either way, so only `creaseweight` differs).
     #[test]
     fn feature_edges_hold_their_line() {
         let mut g = Detail::default();
@@ -747,9 +748,12 @@ mod tests {
         let on_row = |d: &Detail| d.p().iter().filter(|q| (q[2] - 4.0).abs() < 1e-4).count();
         let off_row_near =
             |d: &Detail| d.p().iter().filter(|q| (q[2] - 4.0).abs() > 1e-4 && (q[2] - 4.0).abs() < 0.75).count();
-        let base = defaults().with("percentage", ParamValue::F(40.0)).with("preserveboundary", ParamValue::B(true));
-        let pf =
-            base.clone().with("creases", ParamValue::S("crease".into())).with("creaseweight", ParamValue::F(100.0));
+        let base = defaults()
+            .with("percentage", ParamValue::F(40.0))
+            .with("preserveboundary", ParamValue::B(true))
+            .with("creases", ParamValue::S("crease".into()))
+            .with("creaseweight", ParamValue::F(0.0));
+        let pf = base.clone().with("creaseweight", ParamValue::F(100.0));
         let ctx = CookCtx { time: 0.0, fps: 24.0, params: &pf, log: &|_| {} };
         let with = n.cook(&ctx, &[g.clone(), f.clone()]).expect("reduces with features");
         assert!(with.prims.len() < g.prims.len(), "still reduces the whole mesh");

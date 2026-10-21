@@ -47,7 +47,9 @@ fn hip_gzip_and_plain_parse_identically() {
     assert!(bx.parms.iter().any(|p| p.name == "size" && p.values.len() == 3));
 }
 
-/// Node / wire counts of the IR must equal an independent count over the raw cpio members (`obj/*/*.init`, `inputs { }` lines).
+/// Node / wire counts of the IR must equal an independent count over the raw cpio members (`inputs { }` lines).
+/// Counted members = children of an object-level CONTAINER: a `/obj` child, a `geo`, or a container holding a `geo`
+/// (`obj/asset1/inner_geo1/sphere1`); children of other nested networks (shopnet, SOP subnet) are not IR nodes.
 #[test]
 fn hip_corpus_parse_12() {
     let mut ok = 0;
@@ -61,12 +63,34 @@ fn hip_corpus_parse_12() {
         let bytes = std::fs::read(&path).unwrap();
         let scene = read_hip(&bytes).unwrap_or_else(|e| panic!("{rel}: {e}"));
         let entries = read_cpio(&bytes).unwrap();
-        let depth2 = |n: &str, ext: &str| {
-            n.strip_suffix(ext).is_some_and(|p| p.starts_with("obj/") && p.matches('/').count() == 2)
+        // every `obj/...` node path of the file, with its declared type
+        let inits: Vec<(String, String)> = entries
+            .iter()
+            .filter_map(|e| e.name.strip_suffix(".init").filter(|p| p.starts_with("obj/")))
+            .map(|p| {
+                let data = &entries.iter().find(|e| e.name == format!("{p}.init")).unwrap().data;
+                let ty = String::from_utf8_lossy(data)
+                    .lines()
+                    .find_map(|l| l.strip_prefix("type = ").map(|t| t.trim().to_string()))
+                    .unwrap_or_default();
+                (p.to_string(), ty)
+            })
+            .collect();
+        let container = |p: &str| {
+            p.matches('/').count() == 1
+                || inits.iter().any(|(q, ty)| q == p && ty == "geo")
+                || inits.iter().any(|(q, ty)| ty == "geo" && q.starts_with(&format!("{p}/")))
         };
-        let nodes = entries.iter().filter(|e| depth2(&e.name, ".init")).count();
+        let in_container = |n: &str, ext: &str| {
+            n.strip_suffix(ext).is_some_and(|p| {
+                p.starts_with("obj/")
+                    && p.matches('/').count() >= 2
+                    && p.rsplit_once('/').is_some_and(|(parent, _)| container(parent))
+            })
+        };
+        let nodes = entries.iter().filter(|e| in_container(&e.name, ".init")).count();
         let mut wires = 0;
-        for e in entries.iter().filter(|e| depth2(&e.name, ".def")) {
+        for e in entries.iter().filter(|e| in_container(&e.name, ".def")) {
             let t = String::from_utf8_lossy(&e.data);
             if let Some(i) = t.find("\ninputs\n{\n") {
                 let body: Vec<&str> = t[i + 10..].lines().take_while(|l| l.trim() != "}").collect();

@@ -1,7 +1,7 @@
 // three.js viewport: headlight flat-shaded double-sided surface (earcut), edges, round points, sphere/tube wire proxies,
 // ground grid with coloured axes, corner axis gizmo, P/N number overlays, draw caps. Houdini camera (camera.ts).
 import * as THREE from "three";
-import { clip, type Cam, defaultCam, dolly, dragDolly, eye, fit as fitCam, FOV, orbit, pan, wheelDolly } from "./camera";
+import { autoFrame, clip, type Cam, defaultCam, dolly, dragDolly, eye, fit as fitCam, FOV, orbit, pan, wheelDolly } from "./camera";
 import type { Cooked } from "./api";
 import { describe } from "./pick";
 import { CLICK_SLOP, clampSel, combine, inBox, nearest, projectAll } from "./pick";
@@ -329,8 +329,13 @@ private bb: ReturnType<typeof bounds> = null;
 this.bb = this.fitBb = null;
 this.primC = new Float32Array(0);
   }
-  /** Replace the displayed geometry with a fresh cook and fit the camera. Returns draw-cap warnings (layers skipped, not frozen). */
-  show(c: Cooked): string[] {
+  /** Display identity last auto-framed (null = nothing framed yet). */
+  private framedKey: string | null = null;
+  /** Next `show` frames again (new scene opened). */
+  resetAutoFrame(): void { this.framedKey = null; }
+  /** Replace the displayed geometry with a fresh cook. The camera is fitted only when `key` (display identity) changed
+   *  (first display / display-node switch), never on a same-key recook (timeline frame, param tweak). Returns draw-cap warnings. */
+  show(c: Cooked, key = ""): string[] {
         this.clear();
         const sameGeo = !!this.shown && !this.shown.error && !c.error && this.shown.counts.points === c.counts.points;
         this.shown = c;
@@ -400,7 +405,9 @@ this.primC = new Float32Array(0);
 this.bb = bounds(verts.length ? [...c.positions, ...verts] : c.positions);
       this.computeFitBb();
       this.applyVisibility();
-      this.frame();
+      const r = autoFrame(this.cam, this.framedKey, key, this.fitBb ?? this.bb);
+      this.framedKey = r.framed;
+      if (r.cam !== this.cam) { this.cam = r.cam; this.applyCam(); }
     }
         // the selection survives a re-cook of the same point count (param tweaks), else it is dropped
         if (this.sel.length) { if (sameGeo) this.setSelection(this.sel, false); else this.setSelection([]); }

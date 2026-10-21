@@ -41,5 +41,11 @@ export function fit(c: Cam, b: Bounds): Cam {
   const r = Math.max(b.radius, 1e-3);
   return { ...c, target: [...b.center], dist: clamp((r / Math.sin(FOV / 2)) * FIT_MARGIN, DIST_MIN, DIST_MAX) };
 }
+/** Auto-frame rule on a fresh cook: frame only when the display identity `key` (scene + display node) differs from the
+ *  one last framed and there is geometry. A timeline frame change / param tweak recooks under the same key, so the user's
+ *  orbit / zoom survive playback. Returns the camera and the key now framed. */
+export function autoFrame(c: Cam, framed: string | null, key: string, b: Bounds | null): { cam: Cam; framed: string | null } {
+  return b && key !== framed ? { cam: fit(c, b), framed: key } : { cam: c, framed };
+}
 /** near / far are multiples of the orbit distance. */
 export const clip = (c: Cam): { near: number; far: number } => ({ near: c.dist * 0.01, far: c.dist * 1000 });

@@ -64,7 +64,7 @@ async function recook(): Promise<void> {
       const c = await api.cook();
       const ms = (performance.now() - t0).toFixed(0);
             lastCook = c;
-            const warn = viewport.show(c);
+            const warn = viewport.show(c, String(graph.display));
             await refreshTemplates();
             await refreshOthers();
             syncObjects(); // a Null being edited redraws its indicator
@@ -487,6 +487,7 @@ $<HTMLInputElement>("fitx").addEventListener("change", (e) => { viewport.setFitE
     // no path typed: Open would hand "" to the OS ("The system cannot find the path specified"); ask for one instead
     if (!p) { path.focus(); say("type a scene path (.json / .ens / .nmc), then Enter"); return; }
     try {
+      viewport.resetAutoFrame(); // a newly opened scene frames on its first cook
       if (/\.(ens|nmc|nmb|nma)$/i.test(p)) {
         // Endorphin file: one `file` SOP over it (hexe-geo read_any opens .ens/.nmc as rest-pose geometry).
         await api.graphNew();

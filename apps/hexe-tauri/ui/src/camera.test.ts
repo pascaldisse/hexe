@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { clip, defaultCam, dolly, DIST_MAX, DIST_MIN, eye, fit, FIT_MARGIN, FOV, orbit, pan, PITCH_MAX } from "./camera";
+import { autoFrame, clip, defaultCam, dolly, DIST_MAX, DIST_MIN, eye, fit, FIT_MARGIN, FOV, orbit, pan, PITCH_MAX } from "./camera";
 
 test("orbit moves yaw/pitch and clamps pitch short of the poles", () => {
   const c = orbit(defaultCam(), 100, 0);
@@ -37,4 +37,20 @@ test("fit frames the bounding sphere with the 1.15 margin; clip planes scale wit
   const k = clip(c);
   expect(k.far / k.near).toBeCloseTo(1e5, 3);
   expect(k.near).toBeLessThan(c.dist);
+});
+
+test("autoFrame: timeline recooks under one display key keep the user's camera; zoom-in reaches a small dist", () => {
+  const b = (s: number) => ({ min: [s - 1, -1, -s - 1] as [number, number, number], max: [s + 1, 1, -s + 1] as [number, number, number], center: [s, 0, -s] as [number, number, number], radius: 10 + s });
+  let r = autoFrame(defaultCam(), null, "7", b(0)); // first display: framed
+  expect(r.framed).toBe("7");
+  expect(r.cam.dist).toBeCloseTo(fit(defaultCam(), b(0)).dist, 9);
+  let cam = dolly(orbit(r.cam, 40, 25), -8); // user orbit + zoom in
+  expect(cam.dist).toBeLessThan(0.01);
+  const user = structuredClone(cam);
+  for (let f = 1; f <= 120; f++) { r = autoFrame(cam, r.framed, "7", b(f * 0.37)); cam = r.cam; } // playback: bounds move per frame
+  expect(cam).toEqual(user);
+  cam = dolly(cam, -100);
+  expect(cam.dist).toBe(DIST_MIN); // zoom-in floor is the constant, not per-frame bounds
+  expect(autoFrame(cam, r.framed, "9", b(1)).cam.target).toEqual([1, 0, -1]); // display-node change reframes
+  expect(autoFrame(cam, "7", "7", null).cam).toBe(cam); // no geometry: untouched
 });

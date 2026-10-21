@@ -42,7 +42,7 @@ Render: `hexe-tauri examples/<f>.json --render <png> --size 480x300` (proof PNGs
 | [divide](#divide) | 1 | 8 | shipped (sop-divide) | `divide.json` |
 | [dot](#dot) | 1 | 1 | partial (sop-dot) | none |
 | [edgedivide](#edgedivide) | 1 | 7 | shipped (sop-edgedivide) | `edgedivide.json` |
-| [endosim](#endosim) | 1 | 1 | partial (sop-endosim) | none |
+| [endosim](#endosim) | 1 | 2 | partial (sop-endosim) | none |
 | [enumerate](#enumerate) | 1 | 8 | partial (sop-enumerate) | none |
 | [facet](#facet) | 1 | 6 | shipped (sop-facet) | none |
 | [file](#file) | 0 | 3 | shipped (sop-file) | via `file-rop.json` |
@@ -66,7 +66,7 @@ Render: `hexe-tauri examples/<f>.json --render <png> --size 480x300` (proof PNGs
 | [mountain](#mountain) | 1 | 15 | shipped (sop-mountain) | `mountain.json` |
 | [name](#name) | 1 | 21 | shipped (sop-name) | `name.json` |
 | [normal](#normal) | 1 | 4 | shipped (sop-normal) | `normal.json` |
-| [null](#null) | 1 | 0 | shipped (sop-registry) | via `switch.json` |
+| [null](#null) | 1 | 2 | shipped (sop-registry) | via `switch.json` |
 | [orientalongcurve](#orientalongcurve) | 1 | 54 | partial (sop-orientalongcurve) | none |
 | [output](#output) | 1 | 1 | shipped (sop-output) | via `switch.json` |
 | [peak](#peak) | 1 | 1 | shipped (sop-peak) | `peak.json` |
@@ -102,7 +102,7 @@ Render: `hexe-tauri examples/<f>.json --render <png> --size 480x300` (proof PNGs
 | [wrangle](#wrangle) | 1 | 2 | shipped (sop-wrangle) | `wrangle.json` |
 | [xform](#xform) | 1 | 13 | shipped (sop-transform) | via `boolean.json` |
 
-Totals: 94 SOPs · 69 with an example (43 dedicated + 26 via) · parity 83 shipped / 11 partial / 0 planned / 0 no-row · 1457 params in total.
+Totals: 94 SOPs · 69 with an example (43 dedicated + 26 via) · parity 83 shipped / 11 partial / 0 planned / 0 no-row · 1460 params in total.
 Gaps: 25 SOP w/o example.
 
 ## Parameters
@@ -1271,6 +1271,7 @@ Inputs: scene.
 | param | label | type | default | range / menu |
 |---|---|---|---|---|
 | `frame` | Frame Override (0 = follow timeline $F; else 1-based sim frame) | int | `0` | 0 … 2400 |
+| `behaviours` | Behaviours (1 = active ragdoll: scene behaviours + force events, 0 = passive ragdoll) | int | `1` | 0 … 1 |
 
 ### enumerate
 
@@ -1672,7 +1673,10 @@ Inputs: input0.
 
 Inputs: input.
 
-No parameters.
+| param | label | type | default | range / menu |
+|---|---|---|---|---|
+| `copyinput` | Copy Input (Note: Input will be still cooked if disabled) | bool | `true` |  |
+| `cacheinput` | Cache Input | bool | `false` |  |
 
 ### orientalongcurve
 

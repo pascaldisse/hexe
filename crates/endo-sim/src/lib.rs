@@ -404,10 +404,22 @@ impl Sim {
             let tag = (i + 1) as u128;
             let posed = scene.posed_locals(c, 0.0);
             let selfc = Some((tag, &mut self_pairs.allowed));
-            rigs.push(add_character(&mut world, c, &posed, group, selfc, opt.secondary, &mut mats));
+            // starts NoPhysics (clip-driven), later full physics: the handover pose is the clip's, not the rest pose
+            let handover =
+                scene.incarnations().into_iter().find(|i| i.character == c.name).is_some_and(|i| !i.full_physics());
+            rigs.push(add_character(&mut world, c, &posed, group, selfc, opt.secondary, handover, &mut mats));
         }
         if let Some(e) = &scene.environment {
-            rigs.push(add_character(&mut world, e, &scene.posed_locals(e, 0.0), WORLD_GROUP, None, false, &mut mats));
+            rigs.push(add_character(
+                &mut world,
+                e,
+                &scene.posed_locals(e, 0.0),
+                WORLD_GROUP,
+                None,
+                false,
+                false,
+                &mut mats,
+            ));
         }
         // the built-in ground is the environment's `background` surface (DefaultGroundCollision, tarmac)
         let ground_mat = scene
@@ -761,10 +773,12 @@ impl Sim {
         let desc = |h: ColliderHandle, c: &Collider| {
             let g = c.collision_groups();
             format!(
-                "{} {:?} {:?} m={:x} f={:x} sg={:x}/{:x} sensor={} hooks={:?}",
+                "{} {:?} {:?} body={:?} mat={:?} m={:x} f={:x} sg={:x}/{:x} sensor={} hooks={:?}",
                 who(h),
                 h.into_raw_parts(),
                 c.shape().shape_type(),
+                c.parent().and_then(|p| self.world.bodies.get(p)).map(|b| b.body_type()),
+                self.self_pairs.mats.of.get(&h).and_then(|&i| self.self_pairs.mats.names.get(i)),
                 g.memberships.bits(),
                 g.filter.bits(),
                 c.solver_groups().memberships.bits(),
@@ -774,12 +788,65 @@ impl Sim {
             )
         };
         let Some(r) = self.rigs.iter().find(|r| r.name == character) else { return Vec::new() };
-        let mut out = Vec::new();
+        let kin = r.handles.iter().flatten().filter_map(|h| self.world.bodies.get(*h)).filter(|b| b.is_kinematic()).count();
+        // worst joint anchor gap (m) of this rig: kinematic clip poses that break the rig's bone lengths snap on handover
+        let mine: HashSet<RigidBodyHandle> = r.handles.iter().flatten().copied().collect();
+        let gap = self
+            .world
+            .impulse_joints
+            .iter()
+            .filter(|(_, j)| mine.contains(&j.body1()) && mine.contains(&j.body2()))
+            .filter_map(|(_, j)| {
+                let (b1, b2) = (self.world.bodies.get(j.body1())?, self.world.bodies.get(j.body2())?);
+                let p1 = b1.position() * j.data.local_frame1;
+                let p2 = b2.position() * j.data.local_frame2;
+                let ang = if j.data.as_fixed().is_some() { p1.rotation.angle_between(p2.rotation) } else { 0.0 };
+                Some(((p1.translation - p2.translation).length() + ang, r.handles.iter().position(|h| *h == Some(j.body2()))?))
+            })
+            .fold((0.0f32, 0usize), |a, b| if b.0 > a.0 { b } else { a });
+        let mut out = vec![format!(
+            "bodies={} kinematic={kin} joint_gap={:.4} at {}",
+            r.handles.iter().flatten().count(),
+            gap.0,
+            r.names.get(gap.1).map_or("?", |s| s.as_str())
+        )];
+        // self pairs (`SelfPairs.allowed`) of this rig overlapping now, with the solver's view of each
+        for &(ha, hb) in &self.self_pairs.allowed {
+            let (Some(a), Some(b)) = (self.world.colliders.get(ha), self.world.colliders.get(hb)) else { continue };
+            if self.rigs.get((a.user_data as usize).wrapping_sub(1)).is_none_or(|x| x.name != character) {
+                continue;
+            }
+            let Ok(Some(k)) = rapier3d::parry::query::contact(a.position(), a.shape(), b.position(), b.shape(), 0.0)
+            else {
+                continue;
+            };
+            if k.dist >= 0.0 {
+                continue;
+            }
+            let cp = self.world.narrow_phase.contact_pair(ha, hb);
+            let md = cp
+                .iter()
+                .flat_map(|p| p.manifolds.iter())
+                .flat_map(|m| m.points.iter())
+                .map(|p| p.dist)
+                .fold(f32::INFINITY, f32::min);
+            out.push(format!(
+                "self epa={:.4} manifold={md:.4} soft={:?} | {} | {} | pair={} active={}",
+                k.dist,
+                self.self_pairs.mats.between(ha, hb).map(|i| i.softness),
+                desc(ha, a),
+                desc(hb, b),
+                cp.is_some(),
+                cp.is_some_and(|p| p.has_any_active_contact())
+            ));
+        }
         for b in r.handles.iter().flatten().filter_map(|h| self.world.bodies.get(*h)) {
             for &ha in b.colliders() {
                 let Some(a) = self.world.colliders.get(ha) else { continue };
                 for (hs, s) in self.world.colliders.iter() {
-                    if !s.parent().and_then(|p| self.world.bodies.get(p)).is_none_or(|b| b.is_fixed()) {
+                    // statics + other characters' bodies (cross-character overlaps)
+                    let other = s.user_data != 0 && s.user_data != a.user_data;
+                    if !other && !s.parent().and_then(|p| self.world.bodies.get(p)).is_none_or(|b| b.is_fixed()) {
                         continue;
                     }
                     let d = overlap_depth(a, s);
@@ -888,6 +955,7 @@ fn add_character(
     group: u32,
     selfc: Option<(u128, &mut HashSet<(ColliderHandle, ColliderHandle)>)>,
     rigid_minor: bool,
+    handover: bool,
     mats: &mut Vec<(ColliderHandle, String)>,
 ) -> Rig {
     let dynamic = selfc.is_some();
@@ -973,6 +1041,7 @@ fn add_character(
             *s = a;
         }
     }
+    let unlimited = rigid_minor && handover && c.joints.iter().all(|j| limits_of(j).is_none());
     if let Some((_, allowed)) = selfc {
         // body tree over the body-owning joints: parent body of joint i = anchor of its parent joint
         let up = |i: usize| c.joints.get(i).and_then(|j| j.parent).and_then(|p| anchor.get(p).copied().flatten());
@@ -1020,6 +1089,14 @@ fn add_character(
             let lim = limits_of(j).filter(|_| !(rigid_minor && is_minor(&j.name)));
             let spherical = lim.is_some();
             let joint: GenericJoint = match lim {
+                // PLAY: a rig with no joint limits at all (FBX import, effectors DriveNone) = free ball joints in
+                // Endorphin; a rest-pose fixed joint would snap the clip pose back at the full-physics handover
+                None if unlimited => SphericalJointBuilder::new()
+                    .local_frame1(f1)
+                    .local_frame2(f2)
+                    .contacts_enabled(false)
+                    .build()
+                    .into(),
                 Some(l) => SphericalJointBuilder::new()
                     .local_frame1(f1)
                     .local_frame2(f2)

@@ -1,0 +1,2 @@
+F1 bodies=11 kinematic=0 joint_gap=0.0007 at Bone39
+F1 d=-0.0290 manifold=inf epa=Some(-0.028960649) | FBXImport02/Bone48 (21, 0) Capsule body=Some(Dynamic) mat=Some("default") m=2 f=ffffffff sg=ffffffff/ffffffff sensor=false hooks=ActiveHooks(FILTER_CONTACT_PAIRS | MODIFY_SOLVER_CONTACTS) | background/Prop0Joint (87, 0) Cylinder body=Some(Fixed) mat=Some("default") m=80000000 f=ffffffff sg=ffffffff/ffffffff sensor=false hooks=ActiveHooks(MODIFY_SOLVER_CONTACTS) | pair=false active=false pts=0 flags=None

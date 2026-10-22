@@ -337,6 +337,12 @@ impl Sim {
             let ip = &mut sim.world.integration_parameters;
             ip.contact_softness.natural_frequency = PLAY_CONTACT_HZ;
             ip.static_contact_softness.natural_frequency = 2.0 * PLAY_CONTACT_HZ;
+            if let Some((mu, e)) = default_material(&scene.raw) {
+                for (_, c) in sim.world.colliders.iter_mut() {
+                    c.set_friction(mu);
+                    c.set_restitution(e);
+                }
+            }
             let dynamic: Vec<RigidBodyHandle> =
                 sim.world.bodies.iter().filter(|(_, b)| b.is_dynamic()).map(|(h, _)| h).collect();
             for h in dynamic {
@@ -571,11 +577,9 @@ impl Sim {
                     }
                     // shape-shape overlap: catches a limb stuck through a thin slab whose lowest point is already below it
                     for s in &statics {
-                        if let Ok(Some(k)) =
-                            rapier3d::parry::query::contact(c.position(), c.shape(), s.position(), s.shape(), 0.0)
-                            && k.dist < best.0
-                        {
-                            best = (k.dist, j);
+                        let d = overlap_depth(c, s);
+                        if d < best.0 {
+                            best = (d, j);
                         }
                     }
                 }
@@ -598,6 +602,41 @@ impl Sim {
     /// Number of rigid bodies / joints in the world (diagnostics).
     pub fn counts(&self) -> (usize, usize) {
         (self.world.bodies.len(), self.world.impulse_joints.len())
+    }
+}
+
+/// The scene's `<MaterialInteraction name="Default">`: (friction, restitution). `.ens` friction is in percent (Default 100,
+/// Icy 50, Grippy 500), so / 100. The per-surface pair table (`material=` x `materialA/B`) is not applied.
+fn default_material(n: &hexe_geo::endorphin::Node) -> Option<(f32, f32)> {
+    if n.tag == "MaterialInteraction" && n.attr("name") == Some("Default") {
+        return Some((n.f32("friction")? / 100.0, n.f32("restitution").unwrap_or(0.0)));
+    }
+    n.children.iter().find_map(default_material)
+}
+
+/// `-depth` (m) of `a` overlapping the static `b`, 0 if apart. Cuboids: separating axes over `b`'s face normals with `a`'s
+/// support map (parry's EPA reports bogus 10-20 cm depths against the 100 m ground box: witness point 50-100 m off).
+fn overlap_depth(a: &Collider, b: &Collider) -> f32 {
+    if let (Some(bx), Some(m)) = (b.shape().as_cuboid(), a.shape().as_support_map()) {
+        let (r, o) = (b.position().rotation, b.position().translation);
+        let mut pen = f32::INFINITY;
+        for (k, h) in bx.half_extents.to_array().into_iter().enumerate() {
+            let n = r * Vec3::from_array(std::array::from_fn(|i| if i == k { 1.0 } else { 0.0 }));
+            for n in [n, -n] {
+                // how far `a` reaches past the face with outward normal `n`, measured inward
+                let p = m.support_point(a.position(), -n);
+                pen = pen.min(h - (p - o).dot(n));
+            }
+        }
+        // face axes alone miss edge/vertex separations: GJK's boolean test settles those
+        let hit = pen > 0.0
+            && rapier3d::parry::query::intersection_test(a.position(), a.shape(), b.position(), b.shape())
+                .unwrap_or(true);
+        return if hit { -pen } else { 0.0 };
+    }
+    match rapier3d::parry::query::contact(a.position(), a.shape(), b.position(), b.shape(), 0.0) {
+        Ok(Some(k)) if k.dist < 0.0 => k.dist,
+        _ => 0.0,
     }
 }
 

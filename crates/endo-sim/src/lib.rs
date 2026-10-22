@@ -45,6 +45,11 @@ const SOFT_ERP: f32 = 0.2;
 /// Density for bodies whose mass the file does not give (water-ish, like a body).
 const FALLBACK_DENSITY: f32 = 1000.0;
 const MIN_MASS: f32 = 0.05;
+/// Hold-row error reduction per step. The exe's Karma world gamma was not found (proof/h56); 1.0 = least regression vs
+/// h55 over the sample scenes (gamma 0.2 / eps 1e-5 = Karma SDK defaults measured worse, proof/h56/g0.2_e1e-5.txt).
+pub const KARMA_GAMMA: f32 = 1.0;
+/// Hold-row constraint force mixing (Rapier `cfm_coeff`, mass-normalised); 1.0 with `KARMA_GAMMA` 1.0 = k 1/h^2, c 0.
+pub const KARMA_EPSILON: f32 = 1.0;
 /// Placeholder half extents of unknown (`File`/`Mesh`) geometry: the 5 cm box `endorphin_geo` draws.
 const PLACEHOLDER_HALF: [f32; 3] = [0.025; 3];
 /// `.ens` densities are g/cm^3 (Head 4.55 ... limbs 1.5): kg/m^3 = x 1000. Only the `secondary` build uses them scaled;
@@ -120,6 +125,10 @@ pub struct Sim {
     self_pairs: SelfPairs,
     /// PLAY build: the scene's `Lock` / `JoinBodies` constraint events.
     holds: Vec<HoldRt>,
+    /// `Lock` / `JoinBodies` row error reduction per step (default `KARMA_GAMMA`).
+    pub hold_gamma: f32,
+    /// `Lock` / `JoinBodies` row constraint force mixing (default `KARMA_EPSILON`).
+    pub hold_eps: f32,
     /// h54 (default true): a `<ForceEvent>` on a body welded by a `JoinBodies` hold accelerates the whole group
     /// (force = accel x group mass). false = pre-h54 (accel x the one body's mass).
     pub force_welded: bool,
@@ -143,8 +152,12 @@ pub struct HoldRt {
     joints: Vec<ImpulseJointHandle>,
     /// 0 = waiting, 1 = holding, 2 = released.
     state: u8,
-    /// Substep (s) the rows are solved at (set by `Sim::step`): motor gains rigid at this resolution.
+    /// Substep (s) the rows are solved at (set by `Sim::step`).
     dt: f32,
+    /// Karma error reduction per step (`Sim::hold_gamma`).
+    gamma: f32,
+    /// Karma constraint force mixing (`Sim::hold_eps`).
+    eps: f32,
 }
 
 impl HoldRt {
@@ -164,13 +177,16 @@ impl HoldRt {
             (JointAxis::AngY, ang[1]),
             (JointAxis::AngZ, ang[2]),
         ];
-        // Karma RPRO row: rigid (error corrected at substep resolution: k = 1/h^2, c = 2/h, mass-independent), force
-        // bounded |f| <= s; s == 0 -> no row (free axis)
-        let (k, c) = (1.0 / (self.dt * self.dt), 2.0 / self.dt);
-        let joint = |f1: Pose| {
+        // Karma RPRO row: ERP gamma, CFM epsilon (mass-normalised). Rapier AccelerationBased: erp/h = k / (h k + c),
+        // cfm = 1 / (h^2 k + h c) -> k = gamma / (eps h^2), c = (1 - gamma) / (eps h). Force bound |f| <= s;
+        // s == 0 -> no row (free axis)
+        let (h, g, e) = (self.dt, self.gamma, self.eps.max(f32::EPSILON));
+        let (k, c) = (g / (e * h * h), (1.0 - g).max(0.0) / (e * h));
+        // exe 0x4c64a0 / 0x7cdcd8: body1 = the held body (row axes in its frame), body2 = reference (absent for Lock)
+        let joint = |f2: Pose| {
             let mut j = GenericJointBuilder::new(JointAxesMask::empty())
-                .local_frame1(f1)
-                .local_frame2(Pose::IDENTITY)
+                .local_frame1(Pose::IDENTITY)
+                .local_frame2(f2)
                 .contacts_enabled(false);
             for &(ax, s) in axes.iter().filter(|a| a.1 > 0.0) {
                 j = j
@@ -185,9 +201,10 @@ impl HoldRt {
             let held: Vec<RigidBodyHandle> = bodies.into_iter().filter(|b| dynamic(w, *b)).collect();
             for b in held {
                 let Some(p) = w.bodies.get(b).map(|x| *x.position()) else { continue };
-                self.joints.push(w.insert_impulse_joint(anchor, b, joint(p)));
+                self.joints.push(w.insert_impulse_joint(b, anchor, joint(p)));
             }
-        } else if let Some((&a, rest)) = bodies.split_first() {
+        } else if let Some((&a, rest)) = bodies.split_last() {
+            // exe 0x4c64b1: JoinBodies reference = the LAST listed body; one magnet per other body to it
             for &b in rest {
                 if !(dynamic(w, a) || dynamic(w, b)) {
                     continue;
@@ -197,7 +214,7 @@ impl HoldRt {
                     continue;
                 };
                 let rel = pa.inverse() * pb;
-                self.joints.push(w.insert_impulse_joint(a, b, joint(rel)));
+                self.joints.push(w.insert_impulse_joint(b, a, joint(rel)));
             }
         }
         self.state = 1;
@@ -601,6 +618,8 @@ impl Sim {
             self_pairs,
             holds: Vec::new(),
             force_welded: true,
+            hold_gamma: KARMA_GAMMA,
+            hold_eps: KARMA_EPSILON,
         };
         sim.add_behaviours(scene, opt);
         if opt.secondary {
@@ -706,6 +725,8 @@ impl Sim {
                 joints: Vec::new(),
                 state: 0,
                 dt: MAX_SUBSTEP,
+                gamma: KARMA_GAMMA,
+                eps: KARMA_EPSILON,
             });
         }
     }
@@ -732,6 +753,8 @@ impl Sim {
             let frame = ((self.time + sub * k as f32) * behaviour::FRAME_RATE + 1e-3).floor() as i32;
             for h in &mut self.holds {
                 h.dt = sub;
+                h.gamma = self.hold_gamma;
+                h.eps = self.hold_eps;
                 h.update(&mut self.world, frame);
             }
             if let Some(b) = self.behave.as_mut() {

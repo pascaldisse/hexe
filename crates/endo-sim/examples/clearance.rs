@@ -17,6 +17,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let opt = SimOptions { behaviours: mode >= 1, forces: mode >= 1, secondary: mode >= 2 };
     let mut sim = Sim::from_scene_props(&s, opt, opt.secondary && !on("PROPS_FIXED", false));
     sim.force_welded = on("FORCE_WELDED", true);
+    // h56 A/B: HOLD_GAMMA=<erp> / HOLD_EPS=<cfm> (Lock / JoinBodies rows)
+    let num = |k: &str| std::env::var(k).ok().and_then(|v| v.parse::<f32>().ok());
+    if let Some(g) = num("HOLD_GAMMA") {
+        sim.hold_gamma = g;
+    }
+    if let Some(e) = num("HOLD_EPS") {
+        sim.hold_eps = e;
+    }
     // FORCES=1 -> per <ForceEvent> target: accel, masses, impulse N s, measured dv of the body and of its pushed group
     if std::env::var("FORCES").is_ok() {
         let last = sim.force_diag().iter().map(|f| f.1).max().unwrap_or(0);

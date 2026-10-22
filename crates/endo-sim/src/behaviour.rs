@@ -31,7 +31,10 @@ const RATE_SLOW: f32 = 1.5;
 const RATE_FAST: f32 = 8.0;
 /// Hands never aim farther than this many arm lengths from the shoulder.
 const MAX_AIM: f32 = 1.4;
-/// ForceEvent push: acceleration = `relativeAcceleration` x |Vk| x |g| on the target body (UNVERIFIED mapping).
+/// ForceEvent push: acceleration = `relativeAcceleration` x |Vk| x |g| of the pushed object. |Vk| = the event's own
+/// uniform gizmo scale (`endorphin.exe` ForceEventData getScale = |TransformMatrix row|, setScale clamps <= 50); the
+/// "relative" acceleration is mass-independent: the force is that acceleration x the pushed mass (the target body, or
+/// the whole welded group while a `JoinBodies` hold joins it). Units x|g| UNVERIFIED (the file carries no unit field).
 const FORCE_USES_VK_SCALE: bool = true;
 
 /// Swing gains of one joint (from the character calibration set).
@@ -391,9 +394,10 @@ impl ForceRt {
     pub(crate) fn active_at(&self, frame: i32) -> bool {
         frame >= self.start && frame < self.end
     }
-    pub(crate) fn tick(&self, w: &mut PhysicsWorld, dt: f32) {
+    /// `mass` = the pushed mass (kg): the body's own, or its welded group's (`Sim::pushed_mass`).
+    pub(crate) fn tick(&self, w: &mut PhysicsWorld, dt: f32, mass: f32) {
         let Some(b) = w.bodies.get_mut(self.body) else { return };
-        let f = self.accel * b.mass() * dt;
+        let f = self.accel * mass * dt;
         b.apply_impulse_at_point(f, self.point, true);
     }
 }

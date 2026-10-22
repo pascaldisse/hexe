@@ -45,8 +45,10 @@ const SOFT_ERP: f32 = 0.2;
 /// Density for bodies whose mass the file does not give (water-ish, like a body).
 const FALLBACK_DENSITY: f32 = 1000.0;
 const MIN_MASS: f32 = 0.05;
-/// `Lock` / `JoinBodies` strength at or above which an axis is locked rigid (sample scenes: 1e5 / 1e6 hold, 1e3 guide).
+/// Pre-h54 mapping (`Sim::hold_springs = false`): strength at or above which an axis is locked rigid.
 const HOLD_RIGID: f32 = 1.0e4;
+/// `Lock` / `JoinBodies` spring damping ratio: the file carries no damping field -> critically damped spring.
+const HOLD_ZETA: f32 = 1.0;
 /// Placeholder half extents of unknown (`File`/`Mesh`) geometry: the 5 cm box `endorphin_geo` draws.
 const PLACEHOLDER_HALF: [f32; 3] = [0.025; 3];
 /// `.ens` densities are g/cm^3 (Head 4.55 ... limbs 1.5): kg/m^3 = x 1000. Only the `secondary` build uses them scaled;
@@ -122,12 +124,23 @@ pub struct Sim {
     self_pairs: SelfPairs,
     /// PLAY build: the scene's `Lock` / `JoinBodies` constraint events.
     holds: Vec<HoldRt>,
+    /// h54 (default true): a `<ForceEvent>` on a body welded by a `JoinBodies` hold accelerates the whole group
+    /// (force = accel x group mass). false = pre-h54 (accel x the one body's mass).
+    pub force_welded: bool,
+    /// h54 (default false): `Lock` / `JoinBodies` strengths as springs (`HoldRt`); off because it regressed Sword env
+    /// -7 -> -17 mm and Balcony ch03 self -8 -> -14 mm (proof/h54). false = pre-h54 mapping. Set before
+    /// the first `step` (holds engage there).
+    pub hold_springs: bool,
 }
 
 /// `<TertiaryBehaviour lockType="Lock|JoinBodies">` (keepOffset): over frames [start, end) the listed bodies are held by
 /// fixed joints at their pose of frame `start` — Lock: each to the world, JoinBodies: each to the first listed body.
 /// Per axis (joint frame = body frame at `start`): `PositionStrength` / `AngularStrength` >= `HOLD_RIGID` -> locked axis,
-/// 0 -> free, in between -> position motor (stiffness = strength, damping = sqrt(strength); mapping UNVERIFIED).
+/// File meaning (h54): the event's only gains are `PositionStrength` / `AngularStrength` (per axis; no stiffness / damping
+/// fields; `endorphin.exe` API `SetPositionStrength` / `SetOrientationStrength`) = spring stiffness N/m and N m/rad.
+/// So every axis with strength > 0 is a force-based spring k = strength, critically damped c = 2 zeta sqrt(k m_eff)
+/// (m_eff = reduced mass / mean principal inertia of the pair); 0 -> free. Rapier's springs are implicit, so 1e5..1e6
+/// stay stable. `Sim::hold_springs = false` restores the pre-h54 guess (>= `HOLD_RIGID` rigid, else k = s, c = sqrt s).
 pub struct HoldRt {
     pub name: String,
     pub lock: bool,
@@ -140,12 +153,47 @@ pub struct HoldRt {
     joints: Vec<ImpulseJointHandle>,
     /// 0 = waiting, 1 = holding, 2 = released.
     state: u8,
+    /// h54 file mapping (springs) vs the pre-h54 guess.
+    springs: bool,
+    /// Substep (s) the springs are integrated at (set by `Sim::step`).
+    dt: f32,
+}
+
+/// (mass kg, mean principal inertia kg m^2) of a dynamic body; (inf, inf) for fixed / missing ones.
+fn body_inertia(w: &PhysicsWorld, h: RigidBodyHandle) -> (f32, f32) {
+    match w.bodies.get(h).filter(|b| b.is_dynamic()) {
+        Some(b) => {
+            let i = b.mass_properties().local_mprops.principal_inertia();
+            (b.mass(), (i.x + i.y + i.z) / 3.0)
+        }
+        None => (f32::INFINITY, f32::INFINITY),
+    }
+}
+
+/// Reduced mass of a pair (one infinite -> the other).
+fn reduced(a: f32, b: f32) -> f32 {
+    if !a.is_finite() {
+        b
+    } else if !b.is_finite() {
+        a
+    } else {
+        a * b / (a + b)
+    }
 }
 
 impl HoldRt {
+    /// Holding and joining `h` into a group (`JoinBodies` only: a `Lock` ties to the world).
+    fn welds(&self, h: RigidBodyHandle) -> bool {
+        self.state == 1 && !self.lock && self.objects.iter().any(|o| o.1 == Some(h))
+    }
     fn engage(&mut self, w: &mut PhysicsWorld) {
         let bodies: Vec<RigidBodyHandle> = self.objects.iter().filter_map(|o| o.1).collect();
         let dynamic = |w: &PhysicsWorld, h: RigidBodyHandle| w.bodies.get(h).is_some_and(|b| b.is_dynamic());
+        if self.springs {
+            self.engage_springs(w, &bodies);
+            self.state = 1;
+            return;
+        }
         let (lin, ang) = self.strength;
         let axes = [
             (JointAxis::LinX, JointAxesMask::LIN_X, lin[0]),
@@ -184,6 +232,59 @@ impl HoldRt {
             }
         }
         self.state = 1;
+    }
+    /// h54: per axis, strength > 0 -> critically damped force spring k = strength (see `HoldRt`).
+    fn engage_springs(&mut self, w: &mut PhysicsWorld, bodies: &[RigidBodyHandle]) {
+        let (lin, ang) = self.strength;
+        let axes = [
+            (JointAxis::LinX, lin[0], false),
+            (JointAxis::LinY, lin[1], false),
+            (JointAxis::LinZ, lin[2], false),
+            (JointAxis::AngX, ang[0], true),
+            (JointAxis::AngY, ang[1], true),
+            (JointAxis::AngZ, ang[2], true),
+        ];
+        let dt = self.dt;
+        let joint = |f1: Pose, (m, i): (f32, f32)| {
+            // a spring whose natural period the substep cannot resolve (omega h >= 1) is rigid at this resolution:
+            // lock the axis (an explicit 1e5 spring on overlapping pieces is what the file means by "held")
+            let me = |angular: bool| if angular { i } else { m };
+            let stiff = |k: f32, angular: bool| me(angular).is_finite() && (k / me(angular)).sqrt() * dt >= 1.0;
+            let mask = [JointAxesMask::LIN_X, JointAxesMask::LIN_Y, JointAxesMask::LIN_Z, JointAxesMask::ANG_X, JointAxesMask::ANG_Y, JointAxesMask::ANG_Z]
+                .iter()
+                .zip(axes.iter())
+                .filter(|(_, a)| a.1 > 0.0 && stiff(a.1, a.2))
+                .fold(JointAxesMask::empty(), |acc, (mk, _)| acc | *mk);
+            let mut j = GenericJointBuilder::new(mask).local_frame1(f1).local_frame2(Pose::IDENTITY).contacts_enabled(false);
+            for &(ax, k, angular) in axes.iter().filter(|a| a.1 > 0.0 && !stiff(a.1, a.2)) {
+                let c = if me(angular).is_finite() { 2.0 * HOLD_ZETA * (k * me(angular)).sqrt() } else { 0.0 };
+                j = j.motor_model(ax, MotorModel::ForceBased).motor_position(ax, 0.0, k, c);
+            }
+            j.build()
+        };
+        let dynamic = |w: &PhysicsWorld, h: RigidBodyHandle| w.bodies.get(h).is_some_and(|b| b.is_dynamic());
+        if self.lock {
+            let anchor = w.insert_body(RigidBodyBuilder::fixed());
+            let held: Vec<RigidBodyHandle> = bodies.iter().copied().filter(|b| dynamic(w, *b)).collect();
+            for b in held {
+                let Some(p) = w.bodies.get(b).map(|x| *x.position()) else { continue };
+                let jt = joint(p, body_inertia(w, b));
+                self.joints.push(w.insert_impulse_joint(anchor, b, jt));
+            }
+        } else if let Some((&a, rest)) = bodies.split_first() {
+            for &b in rest {
+                if !(dynamic(w, a) || dynamic(w, b)) {
+                    continue;
+                }
+                let (Some(pa), Some(pb)) = (w.bodies.get(a).map(|x| *x.position()), w.bodies.get(b).map(|x| *x.position()))
+                else {
+                    continue;
+                };
+                let ((ma, ia), (mb, ib)) = (body_inertia(w, a), body_inertia(w, b));
+                let jt = joint(pa.inverse() * pb, (reduced(ma, mb), reduced(ia, ib)));
+                self.joints.push(w.insert_impulse_joint(a, b, jt));
+            }
+        }
     }
     fn update(&mut self, w: &mut PhysicsWorld, frame: i32) {
         if self.state == 0 && frame >= self.start && frame < self.end {
@@ -480,6 +581,10 @@ impl Sim {
         Sim::from_scene_with(scene, SimOptions { behaviours: true, forces: true, secondary: true })
     }
     pub fn from_scene_with(scene: &Scene, opt: SimOptions) -> Sim {
+        Sim::from_scene_props(scene, opt, opt.secondary)
+    }
+    /// `from_scene_with`, choosing whether environment props with an `<InertialBody>` are dynamic (A/B: props fixed).
+    pub fn from_scene_props(scene: &Scene, opt: SimOptions, dynamic_props: bool) -> Sim {
         let mut world = PhysicsWorld::new();
         world.gravity = if scene.gravity.iter().all(|v| v.is_finite()) { v3(scene.gravity) } else { Vec3::Y * -9.81 };
         let mut rigs = Vec::new();
@@ -506,7 +611,7 @@ impl Sim {
                 false,
                 false,
                 // PLAY: props with an `<InertialBody>` are dynamic (density from the file), the rest stays fixed
-                opt.secondary,
+                dynamic_props,
                 &mut mats,
             ));
         }
@@ -579,6 +684,8 @@ impl Sim {
             max_substep,
             self_pairs,
             holds: Vec::new(),
+            force_welded: true,
+            hold_springs: false,
         };
         sim.add_behaviours(scene, opt);
         if opt.secondary {
@@ -682,6 +789,8 @@ impl Sim {
                 objects,
                 joints: Vec::new(),
                 state: 0,
+                springs: true,
+                dt: MAX_SUBSTEP,
             });
         }
     }
@@ -707,6 +816,8 @@ impl Sim {
         for k in 0..n {
             let frame = ((self.time + sub * k as f32) * behaviour::FRAME_RATE + 1e-3).floor() as i32;
             for h in &mut self.holds {
+                h.springs = self.hold_springs;
+                h.dt = sub;
                 h.update(&mut self.world, frame);
             }
             if let Some(b) = self.behave.as_mut() {
@@ -716,7 +827,8 @@ impl Sim {
                 let frame = ((self.time + sub * k as f32) * behaviour::FRAME_RATE + 1e-3).floor() as i32;
                 for f in &self.forces {
                     if f.active_at(frame) {
-                        f.tick(&mut self.world, sub);
+                        let m = self.pushed_mass(f.body);
+                        f.tick(&mut self.world, sub, m);
                     }
                 }
                 for c in &mut self.catches {
@@ -853,6 +965,52 @@ impl Sim {
     /// Live `behave.rs` diagnostics of a character (`None`: no secondary layer / unknown name).
     pub fn behaviour_state(&self, character: &str) -> Option<BehaviourState> {
         self.behave.as_ref()?.state(character)
+    }
+    /// Mass a `<ForceEvent>` on `h` accelerates: the body's, or (`force_welded`) the sum over the dynamic bodies of the
+    /// engaged `JoinBodies` holds welding it (one level: the sample scenes' groups are disjoint).
+    fn pushed_mass(&self, h: RigidBodyHandle) -> f32 {
+        let own = self.world.bodies.get(h).map_or(0.0, |b| b.mass());
+        if !self.force_welded {
+            return own;
+        }
+        // ordered set: a fixed summation order keeps runs bit-identical
+        let mut group: Vec<RigidBodyHandle> = vec![h];
+        for hold in self.holds.iter().filter(|x| x.welds(h)) {
+            group.extend(hold.objects.iter().filter_map(|o| o.1));
+        }
+        group.sort_by_key(|g| g.into_raw_parts());
+        group.dedup();
+        group.iter().filter_map(|g| self.world.bodies.get(*g)).filter(|b| b.is_dynamic()).map(|b| b.mass()).sum()
+    }
+    /// Diagnostics per built `<ForceEvent>` target: (start, end, accel m/s^2, body mass kg, pushed mass kg now, body
+    /// linvel, linvel of the pushed group's centre of mass).
+    pub fn force_diag(&self) -> Vec<(i32, i32, [f32; 3], f32, f32, [f32; 3], [f32; 3])> {
+        self.forces
+            .iter()
+            .map(|f| {
+                let b = self.world.bodies.get(f.body);
+                let m = self.pushed_mass(f.body);
+                let mut group: HashSet<RigidBodyHandle> = HashSet::from([f.body]);
+                for hold in self.holds.iter().filter(|x| x.welds(f.body)) {
+                    group.extend(hold.objects.iter().filter_map(|o| o.1));
+                }
+                let (mut p, mut ms) = (Vec3::ZERO, 0.0);
+                for g in group.iter().filter_map(|g| self.world.bodies.get(*g)).filter(|b| b.is_dynamic()) {
+                    p += g.linvel() * g.mass();
+                    ms += g.mass();
+                }
+                let gv = if ms > 0.0 { p / ms } else { Vec3::ZERO };
+                (
+                    f.start,
+                    f.end,
+                    f.accel.to_array(),
+                    b.map_or(0.0, |b| b.mass()),
+                    m,
+                    b.map_or([0.0; 3], |b| b.linvel().to_array()),
+                    gv.to_array(),
+                )
+            })
+            .collect()
     }
     /// Drop every scheduled `<ForceEvent>` push (A/B proofs: with vs without the gun shot).
     pub fn disable_force_events(&mut self) {

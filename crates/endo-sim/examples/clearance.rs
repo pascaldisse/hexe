@@ -12,8 +12,39 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let mode: i32 = a.get(2).and_then(|v| v.parse().ok()).unwrap_or(2);
     let frames: usize = a.get(3).and_then(|v| v.parse().ok()).unwrap_or(300);
-    let mut sim =
-        Sim::from_scene_with(&s, SimOptions { behaviours: mode >= 1, forces: mode >= 1, secondary: mode >= 2 });
+    // h54 A/B knobs: PROPS_FIXED=1 (env props fixed), FORCE_WELDED=0 (pre-h54 force mass), HOLD_SPRINGS=1 (h54 spring holds)
+    let on = |k: &str, d: bool| std::env::var(k).map(|v| v != "0").unwrap_or(d);
+    let opt = SimOptions { behaviours: mode >= 1, forces: mode >= 1, secondary: mode >= 2 };
+    let mut sim = Sim::from_scene_props(&s, opt, opt.secondary && !on("PROPS_FIXED", false));
+    sim.force_welded = on("FORCE_WELDED", true);
+    sim.hold_springs = on("HOLD_SPRINGS", false);
+    // FORCES=1 -> per <ForceEvent> target: accel, masses, impulse N s, measured dv of the body and of its pushed group
+    if std::env::var("FORCES").is_ok() {
+        let last = sim.force_diag().iter().map(|f| f.1).max().unwrap_or(0);
+        let mut at: Vec<Option<([f32; 3], [f32; 3])>> = vec![None; sim.force_diag().len()];
+        let sub = |a: [f32; 3], b: [f32; 3]| [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+        let len = |a: [f32; 3]| (a[0] * a[0] + a[1] * a[1] + a[2] * a[2]).sqrt();
+        for k in 0..=last {
+            for (i, f) in sim.force_diag().into_iter().enumerate() {
+                if k == f.0 {
+                    at[i] = Some((f.5, f.6));
+                }
+                if k == f.1 {
+                    let (v0, g0) = at[i].unwrap_or((f.5, f.6));
+                    let a = len(f.2);
+                    let dur = (f.1 - f.0) as f32 / 30.0;
+                    println!(
+                        "force#{i} F{}..F{} |a| {a:.3} m/s2 body {:.3} kg pushed {:.3} kg impulse {:.4} N s expected dv {:.4} m/s measured body dv {:.4} group dv {:.4} m/s",
+                        f.0, f.1, f.3, f.4, a * f.4 * dur, a * dur, len(sub(v0, f.5)), len(sub(g0, f.6))
+                    );
+                }
+            }
+            if k < last {
+                sim.step(1.0 / 30.0);
+            }
+        }
+        return Ok(());
+    }
     if let Ok(w) = std::env::var("WHO") {
         let (who, at) = w.split_once(':').unwrap_or((&w, "1"));
         let at: usize = at.parse().unwrap_or(1);

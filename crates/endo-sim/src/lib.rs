@@ -40,6 +40,8 @@ const PLAY_SOLVER_ITERS: usize = 8;
 /// Contact stiffness (Hz) of the PLAY build; static contacts get twice that (rapier's ratio). Rapier's 30 Hz default
 /// leaves a ~1.5 mm mean sink and lets a fast limb sit half through a thin slab, where the normal can flip.
 const PLAY_CONTACT_HZ: f32 = 60.0;
+/// Error-reduction parameter that turns a `<MaterialInteraction softness>` (read as an ODE CFM) into a contact spring.
+const SOFT_ERP: f32 = 0.2;
 /// Density for bodies whose mass the file does not give (water-ish, like a body).
 const FALLBACK_DENSITY: f32 = 1000.0;
 const MIN_MASS: f32 = 0.05;
@@ -125,6 +127,87 @@ pub struct Sim {
 struct SelfPairs {
     allowed: HashSet<(ColliderHandle, ColliderHandle)>,
     enabled: bool,
+    /// PLAY build: per-surface-pair `<MaterialPair>` interactions (`modify_solver_contacts`).
+    mats: Materials,
+}
+
+/// One `<MaterialInteraction>`: friction (`.ens` percent / 100), restitution, softness (m of allowed penetration),
+/// maxAdhesiveForce (N pulling the pair together while touching).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct Interaction {
+    friction: f32,
+    restitution: f32,
+    softness: f32,
+    adhesion: f32,
+}
+
+/// Scene material table: collider -> `CollisionSurface material=` index; `pair[a * n + b]` = the `<MaterialPair>`'s
+/// interaction (symmetric), falling back to the scene's `Default` interaction.
+#[derive(Default)]
+struct Materials {
+    names: Vec<String>,
+    of: HashMap<ColliderHandle, usize>,
+    pair: Vec<Option<Interaction>>,
+    fallback: Option<Interaction>,
+}
+
+impl Materials {
+    fn parse(root: &hexe_geo::endorphin::Node) -> Materials {
+        fn walk<'a>(n: &'a hexe_geo::endorphin::Node, out: &mut Vec<&'a hexe_geo::endorphin::Node>) {
+            if matches!(n.tag.as_str(), "MaterialInteraction" | "MaterialPair" | "Material") {
+                out.push(n);
+            }
+            n.children.iter().for_each(|c| walk(c, out));
+        }
+        let mut nodes = Vec::new();
+        walk(root, &mut nodes);
+        let inter = |n: &hexe_geo::endorphin::Node| Interaction {
+            friction: n.f32("friction").unwrap_or(100.0) / 100.0,
+            restitution: n.f32("restitution").unwrap_or(0.0),
+            softness: n.f32("softness").unwrap_or(0.0).max(0.0),
+            adhesion: n.f32("maxAdhesiveForce").unwrap_or(0.0).max(0.0),
+        };
+        let named: HashMap<&str, Interaction> = nodes
+            .iter()
+            .filter(|n| n.tag == "MaterialInteraction")
+            .filter_map(|n| Some((n.attr("name")?, inter(n))))
+            .collect();
+        let mut m = Materials { fallback: named.get("Default").copied(), ..Default::default() };
+        for n in nodes.iter().filter(|n| n.tag == "Material") {
+            if let Some(s) = n.attr("name") {
+                m.index(s);
+            }
+        }
+        let pairs: Vec<(usize, usize, Interaction)> = nodes
+            .iter()
+            .filter(|n| n.tag == "MaterialPair")
+            .filter_map(|n| {
+                let i = *named.get(n.attr("interaction")?)?;
+                Some((m.index(n.attr("materialA")?), m.index(n.attr("materialB")?), i))
+            })
+            .collect();
+        let k = m.names.len();
+        m.pair = vec![None; k * k];
+        for (a, b, i) in pairs {
+            m.pair[a * k + b] = Some(i);
+            m.pair[b * k + a] = Some(i);
+        }
+        m
+    }
+    fn index(&mut self, name: &str) -> usize {
+        let name = if name.is_empty() { "default" } else { name };
+        self.names.iter().position(|n| n == name).unwrap_or_else(|| {
+            self.names.push(name.to_string());
+            self.names.len() - 1
+        })
+    }
+    fn between(&self, a: ColliderHandle, b: ColliderHandle) -> Option<Interaction> {
+        let k = self.names.len();
+        match (self.of.get(&a), self.of.get(&b)) {
+            (Some(&x), Some(&y)) if x < k && y < k && self.pair.len() == k * k => self.pair[x * k + y].or(self.fallback),
+            _ => self.fallback,
+        }
+    }
 }
 
 fn ordered(a: ColliderHandle, b: ColliderHandle) -> (ColliderHandle, ColliderHandle) {
@@ -141,6 +224,20 @@ impl PhysicsHooks for SelfPairs {
         }
         (self.enabled && self.allowed.contains(&ordered(cx.collider1, cx.collider2)))
             .then_some(SolverFlags::COMPUTE_IMPULSES)
+    }
+    fn modify_solver_contacts(&self, cx: &mut ContactModificationContext) {
+        let Some(i) = self.mats.between(cx.collider1, cx.collider2) else { return };
+        *cx.friction = i.friction;
+        *cx.restitution = i.restitution;
+        if i.softness > 0.0 {
+            // soft surface = ODE-style constraint force mixing: spring k = ERP / (h * CFM), so a contact carrying the
+            // normal force F = impulse / h rests F / k = impulse * CFM / ERP deep (h cancels)
+            for c in cx.solver_contacts.iter_mut() {
+                let at = (c.contact_id[0] as usize) & 0x7fff_ffff;
+                let imp = cx.manifold.points.get(at).map_or(0.0, |p| p.data.impulse.max(0.0));
+                c.dist += imp * i.softness / SOFT_ERP;
+            }
+        }
     }
 }
 
@@ -299,16 +396,27 @@ impl Sim {
         let mut world = PhysicsWorld::new();
         world.gravity = if scene.gravity.iter().all(|v| v.is_finite()) { v3(scene.gravity) } else { Vec3::Y * -9.81 };
         let mut rigs = Vec::new();
-        let mut self_pairs = SelfPairs { allowed: HashSet::new(), enabled: opt.secondary };
+        let mut self_pairs =
+            SelfPairs { allowed: HashSet::new(), enabled: opt.secondary, mats: Materials::parse(&scene.raw) };
+        let mut mats: Vec<(ColliderHandle, String)> = Vec::new();
         for (i, c) in scene.characters.iter().enumerate() {
             let group = 1u32 << (i % 30);
             let tag = (i + 1) as u128;
             let posed = scene.posed_locals(c, 0.0);
-            rigs.push(add_character(&mut world, c, &posed, group, Some((tag, &mut self_pairs.allowed)), opt.secondary));
+            let selfc = Some((tag, &mut self_pairs.allowed));
+            rigs.push(add_character(&mut world, c, &posed, group, selfc, opt.secondary, &mut mats));
         }
         if let Some(e) = &scene.environment {
-            rigs.push(add_character(&mut world, e, &scene.posed_locals(e, 0.0), WORLD_GROUP, None, false));
+            rigs.push(add_character(&mut world, e, &scene.posed_locals(e, 0.0), WORLD_GROUP, None, false, &mut mats));
         }
+        // the built-in ground is the environment's `background` surface (DefaultGroundCollision, tarmac)
+        let ground_mat = scene
+            .environment
+            .iter()
+            .flat_map(|e| e.bodies.iter())
+            .flat_map(|b| b.collisions.iter())
+            .find(|cs| cs.raw.attr("name") == Some("background"))
+            .map_or(String::new(), |cs| cs.material.clone());
         if scene.use_default_ground {
             let ground = ColliderBuilder::cuboid(100.0, 0.5, 100.0)
                 .position(Pose::from_translation(Vec3::new(0.0, -0.5, 0.0)))
@@ -318,7 +426,23 @@ impl Sim {
                     Group::ALL,
                     InteractionTestMode::And,
                 ));
-            world.insert_collider(ground, None);
+            mats.push((world.insert_collider(ground, None), ground_mat));
+        }
+        for (h, m) in mats {
+            let k = self_pairs.mats.index(&m);
+            self_pairs.mats.of.insert(h, k);
+        }
+        // materials named only by surfaces (no `<Material>` / pair rows) widen the table: re-square it
+        let k = self_pairs.mats.names.len();
+        if self_pairs.mats.pair.len() != k * k {
+            let old = std::mem::take(&mut self_pairs.mats.pair);
+            let k0 = (old.len() as f32).sqrt() as usize;
+            self_pairs.mats.pair = vec![None; k * k];
+            for a in 0..k0 {
+                for b in 0..k0 {
+                    self_pairs.mats.pair[a * k + b] = old[a * k0 + b];
+                }
+            }
         }
         let max_substep = if opt.secondary { MAX_SUBSTEP_PLAY } else { MAX_SUBSTEP };
         let mut sim = Sim {
@@ -337,10 +461,12 @@ impl Sim {
             let ip = &mut sim.world.integration_parameters;
             ip.contact_softness.natural_frequency = PLAY_CONTACT_HZ;
             ip.static_contact_softness.natural_frequency = 2.0 * PLAY_CONTACT_HZ;
-            if let Some((mu, e)) = default_material(&scene.raw) {
+            // per-surface-pair friction / restitution / softness from the scene's `<MaterialPair>` table (hook)
+            if let Some(i) = sim.self_pairs.mats.fallback {
                 for (_, c) in sim.world.colliders.iter_mut() {
-                    c.set_friction(mu);
-                    c.set_restitution(e);
+                    c.set_friction(i.friction);
+                    c.set_restitution(i.restitution);
+                    c.set_active_hooks(c.active_hooks() | ActiveHooks::MODIFY_SOLVER_CONTACTS);
                 }
             }
             let dynamic: Vec<RigidBodyHandle> =
@@ -413,9 +539,37 @@ impl Sim {
                     }
                 }
             }
+            self.adhere(sub);
             self.world.step_with_events(&self.self_pairs, &());
         }
         self.time += dt;
+    }
+    /// `maxAdhesiveForce`: every touching pair whose interaction has one is pulled together along the contact normal
+    /// by that force (the contact solver cancels it while they rest, so it only resists separation).
+    fn adhere(&mut self, dt: f32) {
+        let m = &self.self_pairs.mats;
+        if !m.pair.iter().chain([&m.fallback]).any(|i| i.is_some_and(|i| i.adhesion > 0.0)) {
+            return;
+        }
+        let mut pulls: Vec<(RigidBodyHandle, Vec3)> = Vec::new();
+        for p in self.world.narrow_phase.contact_pairs().filter(|p| p.has_any_active_contact()) {
+            let Some(i) = m.between(p.collider1, p.collider2).filter(|i| i.adhesion > 0.0) else { continue };
+            let Some(k) = p.manifolds.iter().find(|k| !k.data.solver_contacts.is_empty()) else { continue };
+            let n = k.data.normal;
+            let body = |c| self.world.colliders.get(c).and_then(|c: &Collider| c.parent());
+            if let Some(b) = body(p.collider1) {
+                pulls.push((b, n * i.adhesion * dt));
+            }
+            if let Some(b) = body(p.collider2) {
+                pulls.push((b, -n * i.adhesion * dt));
+            }
+        }
+        // applied at the centre of mass: the pull's lever arm is ignored
+        for (h, j) in pulls {
+            if let Some(b) = self.world.bodies.get_mut(h).filter(|b| b.is_dynamic()) {
+                b.apply_impulse(j, true);
+            }
+        }
     }
     /// Same-character contacts (`SelfPairs`) on / off. Default: on in the `secondary` (PLAY) build, off otherwise.
     pub fn set_self_collision(&mut self, on: bool) {
@@ -605,15 +759,6 @@ impl Sim {
     }
 }
 
-/// The scene's `<MaterialInteraction name="Default">`: (friction, restitution). `.ens` friction is in percent (Default 100,
-/// Icy 50, Grippy 500), so / 100. The per-surface pair table (`material=` x `materialA/B`) is not applied.
-fn default_material(n: &hexe_geo::endorphin::Node) -> Option<(f32, f32)> {
-    if n.tag == "MaterialInteraction" && n.attr("name") == Some("Default") {
-        return Some((n.f32("friction")? / 100.0, n.f32("restitution").unwrap_or(0.0)));
-    }
-    n.children.iter().find_map(default_material)
-}
-
 /// `-depth` (m) of `a` overlapping the static `b`, 0 if apart. Cuboids: separating axes over `b`'s face normals with `a`'s
 /// support map (parry's EPA reports bogus 10-20 cm depths against the 100 m ground box: witness point 50-100 m off).
 fn overlap_depth(a: &Collider, b: &Collider) -> f32 {
@@ -647,6 +792,7 @@ fn add_character(
     group: u32,
     selfc: Option<(u128, &mut HashSet<(ColliderHandle, ColliderHandle)>)>,
     rigid_minor: bool,
+    mats: &mut Vec<(ColliderHandle, String)>,
 ) -> Rig {
     let dynamic = selfc.is_some();
     let tag = selfc.as_ref().map_or(0, |s| s.0);
@@ -671,12 +817,12 @@ fn add_character(
             world.insert_body(builder.pose(pose_of(jw)).linear_damping(0.05).angular_damping(0.4).can_sleep(false));
         // collision surfaces with geometry, else the inertial geometry (as endorphin_geo draws it)
         let flag = |cs: &hexe_geo::endorphin::Collision, k: &str| cs.raw.attr(k) != Some("false");
-        let mut shapes: Vec<(Shaped, Xf, bool, bool)> = body
+        let mut shapes: Vec<(Shaped, Xf, bool, bool, String)> = body
             .collisions
             .iter()
             .filter_map(|cs| {
                 let (sib, anc) = (flag(cs, "collidesWithSiblings"), flag(cs, "collidesWithAncestors"));
-                cs.geom.as_ref().map(|g| (shape_of(g), body.xf.mul(&cs.xf), sib, anc))
+                cs.geom.as_ref().map(|g| (shape_of(g), body.xf.mul(&cs.xf), sib, anc, cs.material.clone()))
             })
             .collect();
         // play mode: the foot keeps its inertial box (a flat sole) instead of the collision capsules, so it does not roll
@@ -685,12 +831,13 @@ fn add_character(
             && let Some(g) = &body.inertial
         {
             let (sib, anc) = (shapes.iter().all(|s| s.2), shapes.iter().all(|s| s.3));
-            shapes = vec![(shape_of(g), body.xf, sib, anc)];
+            let mat = shapes.first().map_or(String::new(), |s| s.4.clone());
+            shapes = vec![(shape_of(g), body.xf, sib, anc, mat)];
         }
         if shapes.is_empty()
             && let Some(g) = &body.inertial
         {
-            shapes.push((shape_of(g), body.xf, true, true));
+            shapes.push((shape_of(g), body.xf, true, true, String::new()));
         }
         let vol: f32 = shapes.iter().map(|(s, ..)| s.volume).sum();
         let mass = body
@@ -699,7 +846,7 @@ fn add_character(
             .filter(|m| m.is_finite() && *m > 0.0)
             .unwrap_or(vol * FALLBACK_DENSITY)
             .max(MIN_MASS);
-        for (s, local, sib, anc) in shapes {
+        for (s, local, sib, anc, mat) in shapes {
             let share = if vol > 0.0 { s.volume / vol } else { 1.0 };
             let at = Pose::from_parts(v3(local.p), quat_of(&local) * s.rot);
             let mut col =
@@ -711,6 +858,7 @@ fn add_character(
                 col = col.active_hooks(ActiveHooks::FILTER_CONTACT_PAIRS);
             }
             let ch = world.insert_collider(col, Some(rb));
+            mats.push((ch, mat));
             cols.push((ch, i, sib, anc));
         }
         if let Some(slot) = handles.get_mut(i) {

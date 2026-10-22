@@ -1,0 +1,330 @@
+0x007db250 sub esp, 0x1c
+0x007db253 push ebx
+0x007db254 mov ebx, dword [esp+0x2c]
+0x007db258 push esi
+0x007db259 mov esi, dword [esp+0x28]
+0x007db25d xor edx, edx
+0x007db25f xor eax, eax
+0x007db261 cmp ebx, edx
+0x007db263 push edi
+,=< 0x007db264 jz 0x7db314
+| 0x007db26a lea ebx, dword [ebx]
+.--> 0x007db270 mov ecx, dword [esi+eax*4]
+:| 0x007db273 fld dword [esp+0x38]
+:| 0x007db277 fmul dword [ecx+0xe0]
+:| 0x007db27d inc eax
+:| 0x007db27e cmp eax, ebx
+:| 0x007db280 fadd dword [ecx+0xb0]
+:| 0x007db286 fstp dword [ecx+0xb0]
+:| 0x007db28c mov ecx, dword [esi+eax*4-0x04]
+:| 0x007db290 fld dword [esp+0x38]
+:| 0x007db294 fmul dword [ecx+0xe4]
+:| 0x007db29a fadd dword [ecx+0xb4]
+:| 0x007db2a0 fstp dword [ecx+0xb4]
+:| 0x007db2a6 mov ecx, dword [esi+eax*4-0x04]
+:| 0x007db2aa fld dword [esp+0x38]
+:| 0x007db2ae fmul dword [ecx+0xe8]
+:| 0x007db2b4 fadd dword [ecx+0xb8]
+:| 0x007db2ba fstp dword [ecx+0xb8]
+:| 0x007db2c0 mov ecx, dword [esi+eax*4-0x04]
+:| 0x007db2c4 fld dword [esp+0x38]
+:| 0x007db2c8 fmul dword [ecx+0xf0]
+:| 0x007db2ce fadd dword [ecx+0xc0]
+:| 0x007db2d4 fstp dword [ecx+0xc0]
+:| 0x007db2da mov ecx, dword [esi+eax*4-0x04]
+:| 0x007db2de fld dword [esp+0x38]
+:| 0x007db2e2 fmul dword [ecx+0xf4]
+:| 0x007db2e8 fadd dword [ecx+0xc4]
+:| 0x007db2ee fstp dword [ecx+0xc4]
+:| 0x007db2f4 mov ecx, dword [esi+eax*4-0x04]
+:| 0x007db2f8 fld dword [esp+0x38]
+:| 0x007db2fc fmul dword [ecx+0xf8]
+:| 0x007db302 fadd dword [ecx+0xc8]
+:| 0x007db308 fstp dword [ecx+0xc8]
+`==< 0x007db30e jnz 0x7db270
+`-> 0x007db314 xor edi, edi
+0x007db316 cmp ebx, edx
+,=< 0x007db318 jz 0x7db70a
+| 0x007db31e mov eax, dword [esp+0x30]
+| 0x007db322 push ebp
+| 0x007db323 lea ebp, dword [eax+0x34]
+| 0x007db326 mov ecx, dword [esi+edi*4]
+| 0x007db329 fld dword [esp+0x3c]
+| 0x007db32d fmul dword [ecx+0xb0]
+| 0x007db333 fadd dword [ebp-0x04]
+| 0x007db336 fstp dword [ebp-0x04]
+| 0x007db339 mov eax, dword [esi+edi*4]
+| 0x007db33c fld dword [esp+0x3c]
+| 0x007db340 fmul dword [eax+0xb4]
+| 0x007db346 fadd dword [ebp]
+| 0x007db349 fstp dword [ebp]
+| 0x007db34c mov ecx, dword [esi+edi*4]
+| 0x007db34f invalid
+| 0x007db350 inc esp
+| 0x007db351 and al, 0x3c ; 60
+| 0x007db353 fmul dword [ecx+0xb8]
+| 0x007db359 mov dword [ebp+0x08], 0x3f800000
+| 0x007db360 fadd dword [ebp+0x04]
+| 0x007db363 fstp dword [ebp+0x04]
+| 0x007db366 mov eax, dword [esi+edi*4]
+| 0x007db369 mov ecx, dword [eax+0xc0]
+| 0x007db36f mov dword [esp+0x10], ecx
+| 0x007db373 mov ecx, dword [eax+0xc4]
+| 0x007db379 mov dword [esp+0x14], ecx
+| 0x007db37d mov ecx, dword [eax+0xc8]
+| 0x007db383 mov dword [esp+0x18], ecx
+| 0x007db387 test byte [eax+0x0c], 0x01
+| 0x007db38b jz 0x7db3fe
+| 0x007db38d fld dword [esp+0x18]
+| 0x007db391 lea ecx, dword [eax+0x100]
+| 0x007db397 fmul dword [ecx+0x08]
+| 0x007db39a push ecx
+| 0x007db39b fld dword [esp+0x18]
+| 0x007db39f add eax, 0xd0 ; 208
+| 0x007db3a4 fmul dword [ecx+0x04]
+| 0x007db3a7 faddp st1, st0
+| 0x007db3a9 fld dword [esp+0x14]
+| 0x007db3ad fmul dword [ecx]
+| 0x007db3af faddp st1, st0
+| 0x007db3b1 fst dword [esp+0x3c]
+| 0x007db3b5 fmul dword [esp+0x40]
+| 0x007db3b9 fstp dword [esp]
+| 0x007db3bc push ecx
+| 0x007db3bd push eax
+| 0x007db3be call 0x7d4f70
+| 0x007db3c3 fld dword [esp+0x38]
+| 0x007db3c7 mov eax, dword [esi+edi*4]
+| 0x007db3ca fmul dword [eax+0x100]
+| 0x007db3d0 xor edx, edx
+| 0x007db3d2 fsubr dword [esp+0x10]
+| 0x007db3d6 fstp dword [esp+0x10]
+| 0x007db3da fld dword [esp+0x38]
+| 0x007db3de fmul dword [eax+0x104]
+| 0x007db3e4 fsubr dword [esp+0x14]
+| 0x007db3e8 fstp dword [esp+0x14]
+| 0x007db3ec fld dword [esp+0x38]
+| 0x007db3f0 fmul dword [eax+0x108]
+| 0x007db3f6 fsubr dword [esp+0x18]
+| 0x007db3fa fstp dword [esp+0x18]
+| 0x007db3fe fld dword [0x9061f4]
+| 0x007db404 mov ecx, 0x04
+| 0x007db409 fld dword [esp+0x10]
+| 0x007db40d fmul dword [eax+0xd4]
+| 0x007db413 fchs
+| 0x007db415 fld dword [esp+0x14]
+| 0x007db419 fmul dword [eax+0xd8]
+| 0x007db41f fsubp st1, st0
+| 0x007db421 fld dword [esp+0x18]
+| 0x007db425 fmul dword [eax+0xdc]
+| 0x007db42b fsubp st1, st0
+| 0x007db42d fmul dword [0x908488]
+| 0x007db433 fld dword [esp+0x14]
+| 0x007db437 fmul dword [eax+0xdc]
+| 0x007db43d fld dword [esp+0x10]
+| 0x007db441 fmul dword [eax+0xd0]
+| 0x007db447 faddp st1, st0
+| 0x007db449 fld dword [esp+0x18]
+| 0x007db44d invalid
+| 0x007db44e mov al, bl
+| 0x007db450 add byte [eax], al
+| 0x007db452 add dh, bl
+| 0x007db454 jmp 0xffffffff8505c231
+| 0x007db459 nop
+| 0x007db45a add cl, bl
+| 0x007db45c inc esp
+| 0x007db45d and al, 0x18 ; 24
+| 0x007db45f fmul dword [eax+0xd4]
+| 0x007db465 fld dword [esp+0x10]
+| 0x007db469 fmul dword [eax+0xdc]
+| 0x007db46f fsubp st1, st0
+| 0x007db471 fld dword [esp+0x14]
+| 0x007db475 fmul dword [eax+0xd0]
+| 0x007db47b faddp st1, st0
+| 0x007db47d fmul dword [0x908488]
+| 0x007db483 fstp dword [esp+0x24]
+| 0x007db487 fld dword [esp+0x10]
+| 0x007db48b fmul dword [eax+0xd8]
+| 0x007db491 fld dword [esp+0x14]
+| 0x007db495 fmul dword [eax+0xd4]
+| 0x007db49b fsubp st1, st0
+| 0x007db49d fld dword [esp+0x18]
+| 0x007db4a1 fmul dword [eax+0xd0]
+| 0x007db4a7 faddp st1, st0
+| 0x007db4a9 fmul dword [0x908488]
+| 0x007db4af fstp dword [esp+0x28]
+| 0x007db4b3 fxch st1
+| 0x007db4b5 fmul dword [esp+0x3c]
+| 0x007db4b9 fadd dword [eax+0xd0]
+| 0x007db4bf fstp dword [eax+0xd0]
+| 0x007db4c5 mov eax, dword [esi+edi*4]
+| 0x007db4c8 fmul dword [esp+0x3c]
+| 0x007db4cc fadd dword [eax+0xd4]
+| 0x007db4d2 fstp dword [eax+0xd4]
+| 0x007db4d8 mov eax, dword [esi+edi*4]
+| 0x007db4db fld dword [esp+0x24]
+| 0x007db4df fmul dword [esp+0x3c]
+| 0x007db4e3 fadd dword [eax+0xd8]
+| 0x007db4e9 fstp dword [eax+0xd8]
+| 0x007db4ef mov eax, dword [esi+edi*4]
+| 0x007db4f2 fld dword [esp+0x28]
+| 0x007db4f6 fmul dword [esp+0x3c]
+| 0x007db4fa fadd dword [eax+0xdc]
+| 0x007db500 fstp dword [eax+0xdc]
+| 0x007db506 mov eax, dword [esi+edi*4]
+| 0x007db509 add eax, 0xd0 ; 208
+| 0x007db50e mov edi, edi
+| 0x007db510 fld dword [eax]
+| 0x007db512 add eax, 0x04
+| 0x007db515 dec ecx
+| 0x007db516 fld st0
+| 0x007db518 fmul st0, st1
+| 0x007db51a faddp st2, st0
+| 0x007db51c fstp st0
+| 0x007db51e jnz 0x7db510
+| 0x007db520 fsqrt
+| 0x007db522 mov dword [ebp-0x28], edx
+| 0x007db525 mov dword [ebp-0x18], edx
+| 0x007db528 mov dword [ebp-0x08], edx
+| 0x007db52b mov eax, dword [esi+edi*4]
+| 0x007db52e fdivr dword [0x9070d0]
+| 0x007db534 fld st0
+| 0x007db536 fmul dword [eax+0xd0]
+| 0x007db53c fstp dword [eax+0xd0]
+| 0x007db542 mov eax, dword [esi+edi*4]
+| 0x007db545 fld st0
+| 0x007db547 fmul dword [eax+0xd4]
+| 0x007db54d invalid
+| 0x007db54e cwde
+| 0x007db54f invalid
+| 0x007db550 add byte [eax], al
+| 0x007db552 add byte [ebx-0x3f2641fc], cl
+| 0x007db558 fmul dword [eax+0xd8]
+| 0x007db55e fstp dword [eax+0xd8]
+| 0x007db564 mov eax, dword [esi+edi*4]
+| 0x007db567 fmul dword [eax+0xdc]
+| 0x007db56d fstp dword [eax+0xdc]
+| 0x007db573 mov eax, dword [esi+edi*4]
+| 0x007db576 fld dword [eax+0xd4]
+| 0x007db57c fld dword [eax+0xd0]
+| 0x007db582 fld dword [eax+0xd8]
+| 0x007db588 fld dword [eax+0xdc]
+| 0x007db58e fld st2
+| 0x007db590 fmul st0, st3
+| 0x007db592 fld st4
+| 0x007db594 fmul st0, st5
+| 0x007db596 faddp st1, st0
+| 0x007db598 fld st2
+| 0x007db59a fmul st0, st3
+| 0x007db59c fsubp st1, st0
+| 0x007db59e fld st1
+| 0x007db5a0 fmul st0, st2
+| 0x007db5a2 fsubp st1, st0
+| 0x007db5a4 fstp dword [ebp-0x34]
+| 0x007db5a7 mov eax, dword [esi+edi*4]
+| 0x007db5aa fstp st0
+| 0x007db5ac fstp st0
+| 0x007db5ae fstp st0
+| 0x007db5b0 fstp st0
+| 0x007db5b2 fld dword [eax+0xd8]
+| 0x007db5b8 fmul dword [eax+0xd4]
+| 0x007db5be fadd st0, st0
+| 0x007db5c0 fld dword [eax+0xdc]
+| 0x007db5c6 fmul dword [eax+0xd0]
+| 0x007db5cc fadd st0, st0
+| 0x007db5ce fsubp st1, st0
+| 0x007db5d0 fstp dword [ebp-0x24]
+| 0x007db5d3 mov eax, dword [esi+edi*4]
+| 0x007db5d6 fld dword [eax+0xdc]
+| 0x007db5dc fmul dword [eax+0xd4]
+| 0x007db5e2 fld dword [eax+0xd8]
+| 0x007db5e8 fmul dword [eax+0xd0]
+| 0x007db5ee faddp st1, st0
+| 0x007db5f0 fadd st0, st0
+| 0x007db5f2 fstp dword [ebp-0x14]
+| 0x007db5f5 mov eax, dword [esi+edi*4]
+| 0x007db5f8 fld dword [eax+0xd8]
+| 0x007db5fe fmul dword [eax+0xd4]
+| 0x007db604 fld dword [eax+0xdc]
+| 0x007db60a fmul dword [eax+0xd0]
+| 0x007db610 faddp st1, st0
+| 0x007db612 fadd st0, st0
+| 0x007db614 fstp dword [ebp-0x30]
+| 0x007db617 mov eax, dword [esi+edi*4]
+| 0x007db61a fld dword [eax+0xd0]
+| 0x007db620 fld dword [eax+0xd4]
+| 0x007db626 fld dword [eax+0xd8]
+| 0x007db62c fld dword [eax+0xdc]
+| 0x007db632 fld st3
+| 0x007db634 fmul st0, st4
+| 0x007db636 fld st3
+| 0x007db638 fmul st0, st4
+| 0x007db63a fsubp st1, st0
+| 0x007db63c fld st2
+| 0x007db63e fmul st0, st3
+| 0x007db640 faddp st1, st0
+| 0x007db642 fld st1
+| 0x007db644 inc edi
+| 0x007db645 fmul st0, st2
+| 0x007db647 add ebp, 0x40 ; 64
+| 0x007db64a cmp edi, ebx
+| 0x007db64c fsubp st1, st0
+| 0x007db64e invalid
+| 0x007db64f pop ebp
+| 0x007db650 mov al, byte [0xfcbe448b]
+| 0x007db655 fstp st0
+| 0x007db657 fstp st0
+| 0x007db659 fstp st0
+| 0x007db65b fstp st0
+| 0x007db65d fld dword [eax+0xdc]
+| 0x007db663 fmul dword [eax+0xd8]
+| 0x007db669 fadd st0, st0
+| 0x007db66b fld dword [eax+0xd4]
+| 0x007db671 fmul dword [eax+0xd0]
+| 0x007db677 fadd st0, st0
+| 0x007db679 fsubp st1, st0
+| 0x007db67b fstp dword [ebp-0x50]
+| 0x007db67e mov eax, dword [esi+edi*4-0x04]
+| 0x007db682 fld dword [eax+0xdc]
+| 0x007db688 fmul dword [eax+0xd4]
+| 0x007db68e fadd st0, st0
+| 0x007db690 fld dword [eax+0xd8]
+| 0x007db696 fmul dword [eax+0xd0]
+| 0x007db69c fadd st0, st0
+| 0x007db69e fsubp st1, st0
+| 0x007db6a0 fstp dword [ebp-0x6c]
+| 0x007db6a3 mov eax, dword [esi+edi*4-0x04]
+| 0x007db6a7 fld dword [eax+0xdc]
+| 0x007db6ad fmul dword [eax+0xd8]
+| 0x007db6b3 fld dword [eax+0xd4]
+| 0x007db6b9 fmul dword [eax+0xd0]
+| 0x007db6bf faddp st1, st0
+| 0x007db6c1 fadd st0, st0
+| 0x007db6c3 fstp dword [ebp-0x5c]
+| 0x007db6c6 mov eax, dword [esi+edi*4-0x04]
+| 0x007db6ca fld dword [eax+0xd0]
+| 0x007db6d0 fld dword [eax+0xd4]
+| 0x007db6d6 fld dword [eax+0xd8]
+| 0x007db6dc fld dword [eax+0xdc]
+| 0x007db6e2 fld st3
+| 0x007db6e4 fmul st0, st4
+| 0x007db6e6 fld st3
+| 0x007db6e8 fmul st0, st4
+| 0x007db6ea fsubp st1, st0
+| 0x007db6ec fld st2
+| 0x007db6ee fmul st0, st3
+| 0x007db6f0 fsubp st1, st0
+| 0x007db6f2 fld st1
+| 0x007db6f4 fmul st0, st2
+| 0x007db6f6 faddp st1, st0
+| 0x007db6f8 fstp dword [ebp-0x4c]
+| 0x007db6fb fstp st0
+| 0x007db6fd fstp st0
+| 0x007db6ff fstp st0
+| 0x007db701 fstp st0
+| 0x007db703 jnz 0x7db326
+| 0x007db709 pop ebp
+`-> 0x007db70a pop edi
+0x007db70b pop esi
+0x007db70c pop ebx
+0x007db70d add esp, 0x1c
+0x007db710 ret 0x40

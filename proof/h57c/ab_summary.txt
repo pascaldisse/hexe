@@ -1,0 +1,7 @@
+Balcony character03, clearance mode 2, 600 frames; each cell = 4 runs (HOLD_PERTURB 0, 1e-6, -1e-6, 2e-6), all identical
+gamma  eps    env(mm)  self(mm)
+0.2    0.01   -11      -29     (h57 default)
+1      0.01   -10       -4
+0.2    1       -2       -1
+1      1       -2       -0     (= r_g1e1)
+-> env regression attributed to eps 0.01 (gamma irrelevant: 0.2 vs 1 at eps 0.01 = 1 mm); self -29 needs gamma 0.2 AND eps 0.01

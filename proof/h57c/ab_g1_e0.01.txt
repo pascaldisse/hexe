@@ -1,0 +1,20 @@
+# perturb=0
+character01	env min -0.004 F1 LeftAnkleJoint mean -0.0003	self min -0.001 F48 root-LeftFingersJoint mean -0.0000
+character02	env min -0.003 F491 LeftFingersJoint mean -0.0002	self min -0.009 F153 RightWristJoint-LeftFingersJoint mean -0.0003
+character03	env min -0.010 F55 RightFingersJoint mean -0.0002	self min -0.004 F102 LowerNeckJoint-LeftShoulderJoint mean -0.0025
+character04	env min -0.003 F246 LeftFingersJoint mean -0.0002	self min -0.008 F68 RightFingersJoint-LeftFingersJoint mean -0.0014
+# perturb=1e-6
+character01	env min -0.004 F1 LeftAnkleJoint mean -0.0003	self min -0.001 F48 root-LeftFingersJoint mean -0.0000
+character02	env min -0.003 F491 LeftFingersJoint mean -0.0002	self min -0.009 F153 RightWristJoint-LeftFingersJoint mean -0.0003
+character03	env min -0.010 F55 RightFingersJoint mean -0.0002	self min -0.004 F102 LowerNeckJoint-LeftShoulderJoint mean -0.0025
+character04	env min -0.003 F246 LeftFingersJoint mean -0.0002	self min -0.008 F68 RightFingersJoint-LeftFingersJoint mean -0.0014
+# perturb=-1e-6
+character01	env min -0.004 F1 LeftAnkleJoint mean -0.0003	self min -0.001 F48 root-LeftFingersJoint mean -0.0000
+character02	env min -0.003 F491 LeftFingersJoint mean -0.0002	self min -0.009 F153 RightWristJoint-LeftFingersJoint mean -0.0003
+character03	env min -0.010 F55 RightFingersJoint mean -0.0002	self min -0.004 F102 LowerNeckJoint-LeftShoulderJoint mean -0.0025
+character04	env min -0.003 F246 LeftFingersJoint mean -0.0002	self min -0.008 F68 RightFingersJoint-LeftFingersJoint mean -0.0014
+# perturb=2e-6
+character01	env min -0.004 F1 LeftAnkleJoint mean -0.0003	self min -0.001 F48 root-LeftFingersJoint mean -0.0000
+character02	env min -0.003 F491 LeftFingersJoint mean -0.0002	self min -0.009 F153 RightWristJoint-LeftFingersJoint mean -0.0003
+character03	env min -0.010 F55 RightFingersJoint mean -0.0002	self min -0.004 F102 LowerNeckJoint-LeftShoulderJoint mean -0.0025
+character04	env min -0.003 F246 LeftFingersJoint mean -0.0002	self min -0.008 F68 RightFingersJoint-LeftFingersJoint mean -0.0014

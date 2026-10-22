@@ -86,7 +86,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!(
                 "hold {:?} {} F{}..F{} strength {:?} objects {}/{} {:?}",
                 h.name,
-                if h.lock { "Lock" } else { "JoinBodies" },
+                ["LockPosition", "LockOrientation", "Lock", "LockWithParent", "JoinBodies"][h.kind as usize % 5],
                 h.start,
                 h.end,
                 h.strength,

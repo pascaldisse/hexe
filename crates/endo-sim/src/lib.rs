@@ -45,11 +45,16 @@ const SOFT_ERP: f32 = 0.2;
 /// Density for bodies whose mass the file does not give (water-ish, like a body).
 const FALLBACK_DENSITY: f32 = 1000.0;
 const MIN_MASS: f32 = 0.05;
-/// Hold-row error reduction per step. The exe's Karma world gamma was not found (proof/h56); 1.0 = least regression vs
-/// h55 over the sample scenes (gamma 0.2 / eps 1e-5 = Karma SDK defaults measured worse, proof/h56/g0.2_e1e-5.txt).
-pub const KARMA_GAMMA: f32 = 1.0;
-/// Hold-row constraint force mixing (Rapier `cfm_coeff`, mass-normalised); 1.0 with `KARMA_GAMMA` 1.0 = k 1/h^2, c 0.
-pub const KARMA_EPSILON: f32 = 1.0;
+/// Hold-row error reduction per Karma step (proof/h57): MdtWorldCreate 0x7c245b `[w+0x220] = 0.2` (Kea params
+/// {h 0x218, eps 0x21c, gamma 0x220} -> solver 0x7c2bdc); MdtWorldSetGamma 0x7c25f0 only called at 0x636c46 when the
+/// NM world setting `[+0x18] != -1`, which ctor 0x636d3b / loader 0x636f22 set to -1 -> Karma default stays.
+pub const KARMA_GAMMA: f32 = 0.2;
+/// Hold-row constraint force mixing (Rapier `cfm_coeff`, mass-normalised): MdtWorldCreate 0x7c2449/0x7c2529
+/// `[w+0x21c] = 0.01 / massScale` (massScale `[w+0x1b0]` = NM `[+0x30]` = 1.0, ctor 0x636d66); MdtWorldSetEpsilon
+/// 0x7c25d0 gated like gamma (0x636c59, `[+0x14] == -1`).
+pub const KARMA_EPSILON: f32 = 0.01;
+/// Karma world step (s): NM world ctor 0x636d41 `[+0x08] = 1/120`. Hold rows map (gamma, eps) at this step.
+pub const KARMA_STEP: f32 = 1.0 / 120.0;
 /// Placeholder half extents of unknown (`File`/`Mesh`) geometry: the 5 cm box `endorphin_geo` draws.
 const PLACEHOLDER_HALF: [f32; 3] = [0.025; 3];
 /// `.ens` densities are g/cm^3 (Head 4.55 ... limbs 1.5): kg/m^3 = x 1000. Only the `secondary` build uses them scaled;
@@ -142,7 +147,10 @@ pub struct Sim {
 /// 0 = free. Rapier: a stiff position motor (rigid at substep resolution) capped by `motor_max_force(s)`.
 pub struct HoldRt {
     pub name: String,
+    /// Held to the world (no reference body): `LockPosition` / `LockOrientation` / `Lock`, or a single object.
     pub lock: bool,
+    /// exe lockType (table 0x920e60): 0 LockPosition, 1 LockOrientation, 2 Lock, 3 LockWithParent, 4 JoinBodies.
+    pub kind: u8,
     pub start: i32,
     pub end: i32,
     /// (`PositionStrength` xyz, `AngularStrength` xyz).
@@ -163,12 +171,18 @@ pub struct HoldRt {
 impl HoldRt {
     /// Holding and joining `h` into a group (`JoinBodies` only: a `Lock` ties to the world).
     fn welds(&self, h: RigidBodyHandle) -> bool {
-        self.state == 1 && !self.lock && self.objects.iter().any(|o| o.1 == Some(h))
+        self.state == 1 && self.kind == 4 && self.objects.iter().any(|o| o.1 == Some(h))
     }
     fn engage(&mut self, w: &mut PhysicsWorld) {
         let bodies: Vec<RigidBodyHandle> = self.objects.iter().filter_map(|o| o.1).collect();
         let dynamic = |w: &PhysicsWorld, h: RigidBodyHandle| w.bodies.get(h).is_some_and(|b| b.is_dynamic());
-        let (lin, ang) = self.strength;
+        // exe 0x4c4eef: type 0 -> angular strength 0 (vt+0xa8 <- 0), type 1 -> linear 0 (vt+0xa4 <- 0), >= 2 both
+        let (mut lin, mut ang) = self.strength;
+        match self.kind {
+            0 => ang = [0.0; 3],
+            1 => lin = [0.0; 3],
+            _ => {}
+        }
         let axes = [
             (JointAxis::LinX, lin[0]),
             (JointAxis::LinY, lin[1]),
@@ -178,9 +192,9 @@ impl HoldRt {
             (JointAxis::AngZ, ang[2]),
         ];
         // Karma RPRO row: ERP gamma, CFM epsilon (mass-normalised). Rapier AccelerationBased: erp/h = k / (h k + c),
-        // cfm = 1 / (h^2 k + h c) -> k = gamma / (eps h^2), c = (1 - gamma) / (eps h). Force bound |f| <= s;
-        // s == 0 -> no row (free axis)
-        let (h, g, e) = (self.dt, self.gamma, self.eps.max(f32::EPSILON));
+        // cfm = 1 / (h^2 k + h c) -> k = gamma / (eps h^2), c = (1 - gamma) / (eps h), h = Karma step (KARMA_STEP):
+        // the spring Karma's rows realise, solved at our substep. Force bound |f| <= s; s == 0 -> no row (free axis)
+        let (h, g, e) = (KARMA_STEP.max(self.dt), self.gamma, self.eps.max(f32::EPSILON));
         let (k, c) = (g / (e * h * h), (1.0 - g).max(0.0) / (e * h));
         // exe 0x4c64a0 / 0x7cdcd8: body1 = the held body (row axes in its frame), body2 = reference (absent for Lock)
         let joint = |f2: Pose| {
@@ -204,7 +218,8 @@ impl HoldRt {
                 self.joints.push(w.insert_impulse_joint(b, anchor, joint(p)));
             }
         } else if let Some((&a, rest)) = bodies.split_last() {
-            // exe 0x4c64b1: JoinBodies reference = the LAST listed body; one magnet per other body to it
+            // exe 0x4c6478 (type 3) / 0x4c64b1 (type 4): >= 2 objects -> reference = the LAST listed body (LockWithParent:
+            // its body [+0x1fc] set as magnet parent 0x56fa40); one magnet per other body to it
             for &b in rest {
                 if !(dynamic(w, a) || dynamic(w, b)) {
                     continue;
@@ -691,9 +706,12 @@ impl Sim {
     fn add_holds(&mut self, scene: &Scene) {
         for b in scene.behaviours.iter().filter(|b| b.kind == "TertiaryBehaviour") {
             let n = &b.raw;
-            let lock = match n.attr("lockType") {
-                Some("Lock") => true,
-                Some("JoinBodies") => false,
+            let kind: u8 = match n.attr("lockType") {
+                Some("LockPosition") => 0,
+                Some("LockOrientation") => 1,
+                Some("Lock") => 2,
+                Some("LockWithParent") => 3,
+                Some("JoinBodies") => 4,
                 _ => continue,
             };
             if n.attr("enabled") == Some("false") {
@@ -712,9 +730,13 @@ impl Sim {
                         .collect()
                 })
                 .unwrap_or_default();
+            let objects: Vec<(String, Option<RigidBodyHandle>)> = objects;
+            // exe 0x4c6491: a reference exists only for types >= 3 with more than one object; else held to the world
+            let lock = kind < 3 || objects.len() < 2;
             self.holds.push(HoldRt {
                 name: b.name.clone(),
                 lock,
+                kind,
                 start: int("startFrameNumber"),
                 end: int("endFrameNumber"),
                 strength: (

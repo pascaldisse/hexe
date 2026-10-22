@@ -39,6 +39,43 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         sim.env_pairs(who).iter().for_each(|l| println!("F{at} {l}"));
         return Ok(());
     }
+    // PROPS=ch.Body,ch.Body[:stride] -> the parsed Lock/JoinBodies events, then per `stride` frames each body's position
+    if let Ok(w) = std::env::var("PROPS") {
+        let (list, stride) = w.split_once(':').unwrap_or((&w, "1"));
+        let stride: usize = stride.parse().unwrap_or(1).max(1);
+        for h in sim.holds() {
+            let ok = h.objects.iter().filter(|o| o.1.is_some()).count();
+            let objs: Vec<&str> = h.objects.iter().map(|o| o.0.as_str()).collect();
+            println!(
+                "hold {:?} {} F{}..F{} strength {:?} objects {}/{} {:?}",
+                h.name,
+                if h.lock { "Lock" } else { "JoinBodies" },
+                h.start,
+                h.end,
+                h.strength,
+                ok,
+                h.objects.len(),
+                objs
+            );
+        }
+        let bodies: Vec<(&str, &str)> = list.split(',').filter_map(|b| b.split_once('.')).collect();
+        for f in 1..=frames {
+            if f > 1 {
+                sim.step(1.0 / 30.0);
+            }
+            if f % stride == 0 || f == 1 {
+                let row: Vec<String> = bodies
+                    .iter()
+                    .map(|(c, b)| match sim.body_pos(&s, c, b) {
+                        Some((p, d)) => format!("{c}.{b} {:.4} {:.4} {:.4} {}", p[0], p[1], p[2], if d { "dyn" } else { "fixed" }),
+                        None => format!("{c}.{b} ?"),
+                    })
+                    .collect();
+                println!("F{f}\t{}\tjoints {}", row.join("\t"), sim.holds().iter().map(|h| h.joint_count()).sum::<usize>());
+            }
+        }
+        return Ok(());
+    }
     if let Ok(v) = std::env::var("SELF") {
         sim.set_self_collision(v != "0");
     }

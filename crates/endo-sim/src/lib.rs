@@ -45,6 +45,8 @@ const SOFT_ERP: f32 = 0.2;
 /// Density for bodies whose mass the file does not give (water-ish, like a body).
 const FALLBACK_DENSITY: f32 = 1000.0;
 const MIN_MASS: f32 = 0.05;
+/// `Lock` / `JoinBodies` strength at or above which an axis is locked rigid (sample scenes: 1e5 / 1e6 hold, 1e3 guide).
+const HOLD_RIGID: f32 = 1.0e4;
 /// Placeholder half extents of unknown (`File`/`Mesh`) geometry: the 5 cm box `endorphin_geo` draws.
 const PLACEHOLDER_HALF: [f32; 3] = [0.025; 3];
 /// `.ens` densities are g/cm^3 (Head 4.55 ... limbs 1.5): kg/m^3 = x 1000. Only the `secondary` build uses them scaled;
@@ -118,6 +120,85 @@ pub struct Sim {
     max_substep: f32,
     /// Self-collision filter (`SelfPairs`); `enabled = false` keeps the pre-h48 no-self-contact build.
     self_pairs: SelfPairs,
+    /// PLAY build: the scene's `Lock` / `JoinBodies` constraint events.
+    holds: Vec<HoldRt>,
+}
+
+/// `<TertiaryBehaviour lockType="Lock|JoinBodies">` (keepOffset): over frames [start, end) the listed bodies are held by
+/// fixed joints at their pose of frame `start` — Lock: each to the world, JoinBodies: each to the first listed body.
+/// Per axis (joint frame = body frame at `start`): `PositionStrength` / `AngularStrength` >= `HOLD_RIGID` -> locked axis,
+/// 0 -> free, in between -> position motor (stiffness = strength, damping = sqrt(strength); mapping UNVERIFIED).
+pub struct HoldRt {
+    pub name: String,
+    pub lock: bool,
+    pub start: i32,
+    pub end: i32,
+    /// (`PositionStrength` xyz, `AngularStrength` xyz).
+    pub strength: ([f32; 3], [f32; 3]),
+    /// `character.MetaBodies.Body` -> resolved rigid body (None: unknown / not built).
+    pub objects: Vec<(String, Option<RigidBodyHandle>)>,
+    joints: Vec<ImpulseJointHandle>,
+    /// 0 = waiting, 1 = holding, 2 = released.
+    state: u8,
+}
+
+impl HoldRt {
+    fn engage(&mut self, w: &mut PhysicsWorld) {
+        let bodies: Vec<RigidBodyHandle> = self.objects.iter().filter_map(|o| o.1).collect();
+        let dynamic = |w: &PhysicsWorld, h: RigidBodyHandle| w.bodies.get(h).is_some_and(|b| b.is_dynamic());
+        let (lin, ang) = self.strength;
+        let axes = [
+            (JointAxis::LinX, JointAxesMask::LIN_X, lin[0]),
+            (JointAxis::LinY, JointAxesMask::LIN_Y, lin[1]),
+            (JointAxis::LinZ, JointAxesMask::LIN_Z, lin[2]),
+            (JointAxis::AngX, JointAxesMask::ANG_X, ang[0]),
+            (JointAxis::AngY, JointAxesMask::ANG_Y, ang[1]),
+            (JointAxis::AngZ, JointAxesMask::ANG_Z, ang[2]),
+        ];
+        let mask = axes.iter().filter(|a| a.2 >= HOLD_RIGID).fold(JointAxesMask::empty(), |m, a| m | a.1);
+        let joint = |f1: Pose| {
+            let mut j = GenericJointBuilder::new(mask).local_frame1(f1).local_frame2(Pose::IDENTITY).contacts_enabled(false);
+            for &(ax, _, s) in axes.iter().filter(|a| a.2 > 0.0 && a.2 < HOLD_RIGID) {
+                j = j.motor_position(ax, 0.0, s, s.sqrt());
+            }
+            j.build()
+        };
+        if self.lock {
+            let anchor = w.insert_body(RigidBodyBuilder::fixed());
+            let held: Vec<RigidBodyHandle> = bodies.into_iter().filter(|b| dynamic(w, *b)).collect();
+            for b in held {
+                let Some(p) = w.bodies.get(b).map(|x| *x.position()) else { continue };
+                self.joints.push(w.insert_impulse_joint(anchor, b, joint(p)));
+            }
+        } else if let Some((&a, rest)) = bodies.split_first() {
+            for &b in rest {
+                if !(dynamic(w, a) || dynamic(w, b)) {
+                    continue;
+                }
+                let (Some(pa), Some(pb)) = (w.bodies.get(a).map(|x| *x.position()), w.bodies.get(b).map(|x| *x.position()))
+                else {
+                    continue;
+                };
+                let rel = pa.inverse() * pb;
+                self.joints.push(w.insert_impulse_joint(a, b, joint(rel)));
+            }
+        }
+        self.state = 1;
+    }
+    fn update(&mut self, w: &mut PhysicsWorld, frame: i32) {
+        if self.state == 0 && frame >= self.start && frame < self.end {
+            self.engage(w);
+        } else if self.state == 1 && frame >= self.end {
+            for j in self.joints.drain(..) {
+                w.impulse_joints.remove(j, true);
+            }
+            self.state = 2;
+        }
+    }
+    /// Joints built when engaged (0 before).
+    pub fn joint_count(&self) -> usize {
+        self.joints.len()
+    }
 }
 
 /// Same-character collider pairs Endorphin collides (`CollisionSurface` `collidesWithSiblings` / `collidesWithAncestors`;
@@ -126,6 +207,8 @@ pub struct Sim {
 #[derive(Default)]
 struct SelfPairs {
     allowed: HashSet<(ColliderHandle, ColliderHandle)>,
+    /// Start-pose overlaps of a dynamic prop collider with another dynamic body's collider (filtered out).
+    excluded: HashSet<(ColliderHandle, ColliderHandle)>,
     enabled: bool,
     /// PLAY build: per-surface-pair `<MaterialPair>` interactions (`modify_solver_contacts`).
     mats: Materials,
@@ -219,6 +302,10 @@ impl PhysicsHooks for SelfPairs {
         let (Some(a), Some(b)) = (cx.colliders.get(cx.collider1), cx.colliders.get(cx.collider2)) else {
             return Some(SolverFlags::COMPUTE_IMPULSES);
         };
+        // dynamic environment props: pairs overlapping at the start pose (chair pieces, sword in the hand) never collide
+        if self.excluded.contains(&ordered(cx.collider1, cx.collider2)) {
+            return None;
+        }
         if a.user_data == 0 || a.user_data != b.user_data {
             return Some(SolverFlags::COMPUTE_IMPULSES);
         }
@@ -397,7 +484,7 @@ impl Sim {
         world.gravity = if scene.gravity.iter().all(|v| v.is_finite()) { v3(scene.gravity) } else { Vec3::Y * -9.81 };
         let mut rigs = Vec::new();
         let mut self_pairs =
-            SelfPairs { allowed: HashSet::new(), enabled: opt.secondary, mats: Materials::parse(&scene.raw) };
+            SelfPairs { enabled: opt.secondary, mats: Materials::parse(&scene.raw), ..Default::default() };
         let mut mats: Vec<(ColliderHandle, String)> = Vec::new();
         for (i, c) in scene.characters.iter().enumerate() {
             let group = 1u32 << (i % 30);
@@ -407,7 +494,7 @@ impl Sim {
             // starts NoPhysics (clip-driven), later full physics: the handover pose is the clip's, not the rest pose
             let handover =
                 scene.incarnations().into_iter().find(|i| i.character == c.name).is_some_and(|i| !i.full_physics());
-            rigs.push(add_character(&mut world, c, &posed, group, selfc, opt.secondary, handover, &mut mats));
+            rigs.push(add_character(&mut world, c, &posed, group, selfc, opt.secondary, handover, false, &mut mats));
         }
         if let Some(e) = &scene.environment {
             rigs.push(add_character(
@@ -418,8 +505,33 @@ impl Sim {
                 None,
                 false,
                 false,
+                // PLAY: props with an `<InertialBody>` are dynamic (density from the file), the rest stays fixed
+                opt.secondary,
                 &mut mats,
             ));
+        }
+        // start-pose overlaps between a dynamic prop and any other dynamic body: never collided (as Endorphin starts them)
+        let props: Vec<ColliderHandle> = world
+            .colliders
+            .iter()
+            .filter(|(_, c)| c.user_data == 0 && c.parent().and_then(|p| world.bodies.get(p)).is_some_and(|b| b.is_dynamic()))
+            .map(|(h, _)| h)
+            .collect();
+        for &ha in &props {
+            for (hb, b) in world.colliders.iter() {
+                let Some(a) = world.colliders.get(ha) else { continue };
+                if hb == ha || a.parent() == b.parent() {
+                    continue;
+                }
+                if !b.parent().and_then(|p| world.bodies.get(p)).is_some_and(|x| x.is_dynamic()) {
+                    continue;
+                }
+                if rapier3d::parry::query::intersection_test(a.position(), a.shape(), b.position(), b.shape())
+                    .unwrap_or(true)
+                {
+                    self_pairs.excluded.insert(ordered(ha, hb));
+                }
+            }
         }
         // the built-in ground is the environment's `background` surface (DefaultGroundCollision, tarmac)
         let ground_mat = scene
@@ -466,8 +578,12 @@ impl Sim {
             behave: None,
             max_substep,
             self_pairs,
+            holds: Vec::new(),
         };
         sim.add_behaviours(scene, opt);
+        if opt.secondary {
+            sim.add_holds(scene);
+        }
         if opt.secondary {
             sim.world.integration_parameters.num_solver_iterations = PLAY_SOLVER_ITERS;
             let ip = &mut sim.world.integration_parameters;
@@ -509,21 +625,75 @@ impl Sim {
             }
             let accel = behaviour::force_accel(&ev, g);
             for (ch, body) in &ev.targets {
-                let Some(rig) = self.rigs.iter().find(|r| r.name == *ch) else { continue };
-                // `<Body>Mass` names the MetaBody; its joint is the one whose body that is
-                let Some(ji) = scene
-                    .characters
-                    .iter()
-                    .find(|c| c.name == *ch)
-                    .and_then(|c| c.joints.iter().position(|j| j.body.as_deref() == Some(body.as_str())))
-                else {
-                    continue;
-                };
-                if let Some(Drive::Body(h)) = rig.drives.get(ji) {
-                    self.forces.push(ForceRt { start: ev.start, end: ev.end, body: *h, point: v3(ev.xf.p), accel });
+                // fixed bodies (static environment props) ignore the push
+                if let Some(h) = self.body_of(scene, ch, body).filter(|h| self.world.bodies.get(*h).is_some_and(|b| b.is_dynamic())) {
+                    self.forces.push(ForceRt { start: ev.start, end: ev.end, body: h, point: v3(ev.xf.p), accel });
                 }
             }
         }
+    }
+    /// Rigid body of MetaBody `body` of character `ch` (`<Body>Mass` / `PropNN`): the joint naming it owns the body.
+    fn body_of(&self, scene: &Scene, ch: &str, body: &str) -> Option<RigidBodyHandle> {
+        let rig = self.rigs.iter().find(|r| r.name == ch)?;
+        let ji = scene
+            .characters
+            .iter()
+            .chain(scene.environment.iter())
+            .find(|c| c.name == ch)
+            .and_then(|c| c.joints.iter().position(|j| j.body.as_deref() == Some(body)))?;
+        match rig.drives.get(ji) {
+            Some(Drive::Body(h) | Drive::Shared { body: h, .. }) => Some(*h),
+            _ => None,
+        }
+    }
+    fn add_holds(&mut self, scene: &Scene) {
+        for b in scene.behaviours.iter().filter(|b| b.kind == "TertiaryBehaviour") {
+            let n = &b.raw;
+            let lock = match n.attr("lockType") {
+                Some("Lock") => true,
+                Some("JoinBodies") => false,
+                _ => continue,
+            };
+            if n.attr("enabled") == Some("false") {
+                continue;
+            }
+            let int = |k: &str| n.attr(k).and_then(|v| v.trim().parse::<i32>().ok()).unwrap_or(0);
+            let objects = n
+                .child("Objects")
+                .map(|o| {
+                    o.kids("Object")
+                        .map(|ob| {
+                            let t = ob.text.trim().to_string();
+                            let h = t.split_once(".MetaBodies.").and_then(|(c, m)| self.body_of(scene, c, m));
+                            (t, h)
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            self.holds.push(HoldRt {
+                name: b.name.clone(),
+                lock,
+                start: int("startFrameNumber"),
+                end: int("endFrameNumber"),
+                strength: (
+                    n.child("PositionStrength").map_or([0.0; 3], |s| s.vec3()),
+                    n.child("AngularStrength").map_or([0.0; 3], |s| s.vec3()),
+                ),
+                objects,
+                joints: Vec::new(),
+                state: 0,
+            });
+        }
+    }
+    /// PLAY build: the parsed `Lock` / `JoinBodies` constraint events (diagnostics).
+    pub fn holds(&self) -> &[HoldRt] {
+        &self.holds
+    }
+    /// World centre of mass of the rigid body of MetaBody `body` of `ch` (prop body frames sit at the world origin) and
+    /// whether it is dynamic.
+    pub fn body_pos(&self, scene: &Scene, ch: &str, body: &str) -> Option<([f32; 3], bool)> {
+        let b = self.world.bodies.get(self.body_of(scene, ch, body)?)?;
+        Some((b.center_of_mass().to_array(), b.is_dynamic()))
     }
 
     /// Advance by `dt` seconds (split into substeps of at most 1/120 s). Non-positive / non-finite `dt` is a no-op.
@@ -535,6 +705,10 @@ impl Sim {
         self.world.integration_parameters.dt = dt / n as f32;
         let sub = dt / n as f32;
         for k in 0..n {
+            let frame = ((self.time + sub * k as f32) * behaviour::FRAME_RATE + 1e-3).floor() as i32;
+            for h in &mut self.holds {
+                h.update(&mut self.world, frame);
+            }
             if let Some(b) = self.behave.as_mut() {
                 b.apply(&mut self.world, self.time + sub * k as f32, sub);
             }
@@ -956,6 +1130,7 @@ fn add_character(
     selfc: Option<(u128, &mut HashSet<(ColliderHandle, ColliderHandle)>)>,
     rigid_minor: bool,
     handover: bool,
+    env_dynamic: bool,
     mats: &mut Vec<(ColliderHandle, String)>,
 ) -> Rig {
     let dynamic = selfc.is_some();
@@ -976,7 +1151,9 @@ fn add_character(
             continue;
         }
         let (Some(body), Some(jw)) = (j.body.as_deref().and_then(|n| c.body(n)), rest.get(i)) else { continue };
-        let builder = if dynamic { RigidBodyBuilder::dynamic() } else { RigidBodyBuilder::fixed() };
+        // environment prop with an `<InertialBody>` + density: dynamic in the PLAY build
+        let prop = !dynamic && env_dynamic && body.inertial.is_some() && body.density.is_some_and(|d| d > 0.0);
+        let builder = if dynamic || prop { RigidBodyBuilder::dynamic() } else { RigidBodyBuilder::fixed() };
         let rb =
             world.insert_body(builder.pose(pose_of(jw)).linear_damping(0.05).angular_damping(0.4).can_sleep(false));
         // collision surfaces with geometry, else the inertial geometry (as endorphin_geo draws it)
@@ -1006,7 +1183,15 @@ fn add_character(
         let vol: f32 = shapes.iter().map(|(s, ..)| s.volume).sum();
         let mass = body
             .mass()
-            .map(|m| if rigid_minor { MASS_REF * (m * DENSITY_SCALE / MASS_REF).powf(MASS_EXP) } else { m })
+            .map(|m| {
+                if prop {
+                    m * DENSITY_SCALE
+                } else if rigid_minor {
+                    MASS_REF * (m * DENSITY_SCALE / MASS_REF).powf(MASS_EXP)
+                } else {
+                    m
+                }
+            })
             .filter(|m| m.is_finite() && *m > 0.0)
             .unwrap_or(vol * FALLBACK_DENSITY)
             .max(MIN_MASS);
@@ -1018,7 +1203,7 @@ fn add_character(
             if dynamic {
                 col = col.user_data(tag);
             }
-            if hooked {
+            if hooked || prop {
                 col = col.active_hooks(ActiveHooks::FILTER_CONTACT_PAIRS);
             }
             let ch = world.insert_collider(col, Some(rb));

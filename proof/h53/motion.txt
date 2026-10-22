@@ -1,0 +1,10 @@
+h53 prop motion (PROPS diag, body centre of mass, cm; source props_*.txt, clearance mode 2, 600 f)
+Balcony Prop34 (Chair04, kicked) F1-21 0.71 | F21-73 0.35 | F73-77 0.16 | F77-300 25.38 | F300-301 2.24 | F301-600 52.25 | y F300 0.485 -> F600 0.070
+Balcony Prop32 (Chair04 leg)     F1-21 0.13 | F21-73 0.16 | F73-77 0.05 | F77-300 28.09 | F300-301 2.57 | F301-600 43.96 | y F300 0.420 -> F600 0.029
+Balcony Prop21 (Table)           F1-21 0.88 | F21-77 0.00 | F77-300 75.68 (y 0.769 -> 0.025 by F150) | F300-600 0.00
+Balcony Prop0 (railing, Lock F0-21) F1-21 0.00 | F21-73 0.70 | then 0.01
+Balcony Prop14 (Chair02)         F1-300 0.82 | F301-600 6.59
+Sword Prop0 joined RightHandMass F0-478: | |sword-hand| - d(F1) | max 0.012 mean 0.004 (F1-477); after release max 72.68 mean 65.49
+Sword Prop0 Lock F55-103: sword 1.07, hand 1.49 over F55-103
+Gymnast rings Prop0/Prop01 joined to ropes + hands F0-600: |ring-RightHandMass| - d(F1) max 0.015 mean 0.006; ring travel F1-600 65.48 / 58.96
+Car Hit prop01-prop02 rootMB joined F0-333: |a-b| - d(F1) max 0.012 (F1-333); after release 8.78 max

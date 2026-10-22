@@ -1,0 +1,4 @@
+PROPS_FIXED=0
+character02	env min -0.001 F133 LeftToesJoint mean -0.0001	self min -0.013 F153 RightFingersJoint-LeftFingersJoint mean -0.0002
+PROPS_FIXED=1
+character02	env min -0.002 F356 LeftShoulderJoint mean -0.0007	self min -0.010 F110 RightFingersJoint-LeftFingersJoint mean -0.0002

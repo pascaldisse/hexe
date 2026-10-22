@@ -1,0 +1,12 @@
+source: ~/Downloads/Endorphin 2.5.2 Full Version/PATCH/Resources/Scenes/Sample Scenes/{Balcony,Car Crash}.ens (zlib -> XML), PATCH/bin/endorphin.exe (strings, RTTI, x86 disasm)
+ForceEvent fields (all 14 events, the only ones in Balcony / Car Hit / Gymnast Rings / Sword Play / Car Crash):
+  relativeAcceleration  float  0.2 in every event (=default; exe ForceEventData get/setRelativeAcceleration)   no unit field
+  startFrameNumber/endFrameNumber  [s,e) always e=s+1 -> 1 frame = 1/30 s
+  TransformMatrix Vi/Vj/Vk/Vp  uniformly scaled frame; scale=|row| = ForceEventData::getScale (exe 0x4bc7d0 -> 0x4bc4e0 = sqrt(row.row)); setScale (0x4bc720) clamps >50
+     Vk = arrow direction*scale (scene/world frame), Vp = application point (world)
+  Objects  MetaBody list; no per-event mass flag, no impulse/force flag
+  Balcony "Chair kick" F74..75 Prop34: Vk=(1.4975,~0,1.0393) |Vk|=1.824  Vp=(-0.0365,0.4165,-5.3297)
+  Balcony "Gun shot"   F0..1 UpperSpineMass ch01: |Vk|=30.0
+  Car Crash Force5/13/21/34: |Vk| 16 / 12 / 6 / 12
+Lock/JoinBodies (TertiaryBehaviour) fields: lockType, keepOffset, start/end, PositionStrength xyz, AngularStrength xyz -- no stiffness/damping fields
+  values seen: 0, 500, 1000, 1e5, 1e6 (exe API SetPositionStrength/SetOrientationStrength, setPositionStrengthFromFSM)

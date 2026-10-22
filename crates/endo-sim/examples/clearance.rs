@@ -29,12 +29,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         return Ok(());
     }
+    if let Ok(v) = std::env::var("SELF") {
+        sim.set_self_collision(v != "0");
+    }
     let mut worst: Vec<(String, f32, usize, usize)> = Vec::new();
+    // per character: (sum env depth, deepest self overlap, frame, joint a, joint b, sum self depth)
+    let mut acc: Vec<(String, f32, f32, usize, usize, usize, f32)> = Vec::new();
     for f in 1..=frames {
         if f > 1 {
             sim.step(1.0 / 30.0);
         }
         let rows = sim.env_penetration();
+        for ((name, e, _), (_, d, ja, jb)) in rows.iter().zip(sim.self_penetration()) {
+            match acc.iter_mut().find(|a| a.0 == *name) {
+                Some(a) => {
+                    a.1 += e;
+                    a.6 += d;
+                    if d < a.2 {
+                        (a.2, a.3, a.4, a.5) = (d, f, ja, jb);
+                    }
+                }
+                None => acc.push((name.clone(), *e, d, f, ja, jb, d)),
+            }
+        }
         for (name, d, j) in rows {
             match worst.iter_mut().find(|w| w.0 == name) {
                 Some(w) if d < w.1 => *w = (name, d, f, j),
@@ -50,7 +67,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .find(|c| c.name == name.as_str())
             .and_then(|c| c.joints.get(j))
             .map_or("?", |j| &j.name);
-        println!("{name}\tmin {d:.3}\tF{f}\t{jn}");
+        let jname = |j: usize| {
+            s.characters.iter().find(|c| c.name == name).and_then(|c| c.joints.get(j)).map_or("?", |j| &j.name)
+        };
+        let a = acc.iter().find(|a| a.0 == name).cloned().unwrap_or_default();
+        let n = frames as f32;
+        println!(
+            "{name}\tenv min {d:.3} F{f} {jn} mean {:.4}\tself min {:.3} F{} {}-{} mean {:.4}",
+            a.1 / n,
+            a.2,
+            a.3,
+            jname(a.4),
+            jname(a.5),
+            a.6 / n
+        );
     }
     Ok(())
 }

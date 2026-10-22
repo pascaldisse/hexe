@@ -27,7 +27,7 @@ use behaviour::{CatchFall, ForceRt, Gains};
 use hexe_geo::endorphin::{Character, Geometry, Joint, Limits, Scene, Xf};
 use rapier3d::glamx::{Mat3, Quat, Vec3};
 use rapier3d::prelude::*;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Largest internal substep (s) of a passive / CatchFall-only sim: `step(dt)` splits `dt` so no substep exceeds it.
 const MAX_SUBSTEP: f32 = 1.0 / 120.0;
@@ -110,6 +110,34 @@ pub struct Sim {
     forces: Vec<ForceRt>,
     behave: Option<behave::Behave>,
     max_substep: f32,
+    /// Self-collision filter (`SelfPairs`); `enabled = false` keeps the pre-h48 no-self-contact build.
+    self_pairs: SelfPairs,
+}
+
+/// Same-character collider pairs Endorphin collides (`CollisionSurface` `collidesWithSiblings` / `collidesWithAncestors`;
+/// cousins always), minus parent/child (joint, `contacts_enabled(false)`) and pairs already overlapping at the start pose.
+/// Character colliders carry `user_data = rig index + 1`; any pair of one rig not listed is dropped by the hook.
+#[derive(Default)]
+struct SelfPairs {
+    allowed: HashSet<(ColliderHandle, ColliderHandle)>,
+    enabled: bool,
+}
+
+fn ordered(a: ColliderHandle, b: ColliderHandle) -> (ColliderHandle, ColliderHandle) {
+    if a.into_raw_parts() <= b.into_raw_parts() { (a, b) } else { (b, a) }
+}
+
+impl PhysicsHooks for SelfPairs {
+    fn filter_contact_pair(&self, cx: &PairFilterContext) -> Option<SolverFlags> {
+        let (Some(a), Some(b)) = (cx.colliders.get(cx.collider1), cx.colliders.get(cx.collider2)) else {
+            return Some(SolverFlags::COMPUTE_IMPULSES);
+        };
+        if a.user_data == 0 || a.user_data != b.user_data {
+            return Some(SolverFlags::COMPUTE_IMPULSES);
+        }
+        (self.enabled && self.allowed.contains(&ordered(cx.collider1, cx.collider2)))
+            .then_some(SolverFlags::COMPUTE_IMPULSES)
+    }
 }
 
 impl Rig {
@@ -267,12 +295,15 @@ impl Sim {
         let mut world = PhysicsWorld::new();
         world.gravity = if scene.gravity.iter().all(|v| v.is_finite()) { v3(scene.gravity) } else { Vec3::Y * -9.81 };
         let mut rigs = Vec::new();
+        let mut self_pairs = SelfPairs { allowed: HashSet::new(), enabled: opt.secondary };
         for (i, c) in scene.characters.iter().enumerate() {
             let group = 1u32 << (i % 30);
-            rigs.push(add_character(&mut world, c, &scene.posed_locals(c, 0.0), group, true, opt.secondary));
+            let tag = (i + 1) as u128;
+            let posed = scene.posed_locals(c, 0.0);
+            rigs.push(add_character(&mut world, c, &posed, group, Some((tag, &mut self_pairs.allowed)), opt.secondary));
         }
         if let Some(e) = &scene.environment {
-            rigs.push(add_character(&mut world, e, &scene.posed_locals(e, 0.0), WORLD_GROUP, false, false));
+            rigs.push(add_character(&mut world, e, &scene.posed_locals(e, 0.0), WORLD_GROUP, None, false));
         }
         if scene.use_default_ground {
             let ground = ColliderBuilder::cuboid(100.0, 0.5, 100.0)
@@ -286,8 +317,16 @@ impl Sim {
             world.insert_collider(ground, None);
         }
         let max_substep = if opt.secondary { MAX_SUBSTEP_PLAY } else { MAX_SUBSTEP };
-        let mut sim =
-            Sim { world, rigs, time: 0.0, catches: Vec::new(), forces: Vec::new(), behave: None, max_substep };
+        let mut sim = Sim {
+            world,
+            rigs,
+            time: 0.0,
+            catches: Vec::new(),
+            forces: Vec::new(),
+            behave: None,
+            max_substep,
+            self_pairs,
+        };
         sim.add_behaviours(scene, opt);
         if opt.secondary {
             sim.world.integration_parameters.num_solver_iterations = PLAY_SOLVER_ITERS;
@@ -354,9 +393,39 @@ impl Sim {
                     }
                 }
             }
-            self.world.step();
+            self.world.step_with_events(&self.self_pairs, &());
         }
         self.time += dt;
+    }
+    /// Same-character contacts (`SelfPairs`) on / off. Default: on in the `secondary` (PLAY) build, off otherwise.
+    pub fn set_self_collision(&mut self, on: bool) {
+        self.self_pairs.enabled = on;
+    }
+    /// Diagnostics: per dynamic character, `(deepest overlap m, joint a, joint b)` over the collider pairs Endorphin
+    /// self-collides (`SelfPairs`, independent of `set_self_collision`): minus the penetration depth, 0 = none.
+    pub fn self_penetration(&self) -> Vec<(String, f32, usize, usize)> {
+        let joint_of = |h: ColliderHandle| {
+            let b = self.world.colliders.get(h)?.parent()?;
+            self.rigs.iter().find_map(|r| r.handles.iter().position(|x| *x == Some(b)))
+        };
+        let mut out: Vec<(String, f32, usize, usize)> =
+            self.rigs.iter().filter(|r| r.dynamic).map(|r| (r.name.clone(), 0.0, 0, 0)).collect();
+        for (a, b) in &self.self_pairs.allowed {
+            let (Some(ca), Some(cb)) = (self.world.colliders.get(*a), self.world.colliders.get(*b)) else { continue };
+            let Ok(Some(k)) =
+                rapier3d::parry::query::contact(ca.position(), ca.shape(), cb.position(), cb.shape(), 0.0)
+            else {
+                continue;
+            };
+            let ri = ca.user_data as usize - 1;
+            let Some(name) = self.rigs.get(ri).map(|r| r.name.as_str()) else { continue };
+            if let Some(o) = out.iter_mut().find(|o| o.0 == name)
+                && k.dist < o.1
+            {
+                *o = (o.0.clone(), k.dist, joint_of(*a).unwrap_or(0), joint_of(*b).unwrap_or(0));
+            }
+        }
+        out
     }
 
     /// Simulated seconds so far.
@@ -514,17 +583,20 @@ fn add_character(
     c: &Character,
     locals: &[Xf],
     group: u32,
-    dynamic: bool,
+    selfc: Option<(u128, &mut HashSet<(ColliderHandle, ColliderHandle)>)>,
     rigid_minor: bool,
 ) -> Rig {
+    let dynamic = selfc.is_some();
+    let tag = selfc.as_ref().map_or(0, |s| s.0);
+    // per collider: (handle, owning joint, collidesWithSiblings, collidesWithAncestors)
+    let mut cols: Vec<(ColliderHandle, usize, bool, bool)> = Vec::new();
     // start-pose world matrices incl. the scene placement
     let rest: Vec<Xf> = c.world_of(locals).iter().map(|x| c.xf.mul(x)).collect();
     let owner = owner_joints(c);
-    let groups = InteractionGroups::new(
-        Group::from_bits_retain(group),
-        if dynamic { Group::from_bits_retain(!group) } else { Group::ALL },
-        InteractionTestMode::And,
-    );
+    // own group: only the PLAY build hands it to `SelfPairs`; the others keep the broad-phase cut (bit-identical runs)
+    let hooked = dynamic && rigid_minor;
+    let filter = if dynamic && !hooked { Group::from_bits_retain(!group) } else { Group::ALL };
+    let groups = InteractionGroups::new(Group::from_bits_retain(group), filter, InteractionTestMode::And);
     let mut handles: Vec<Option<RigidBodyHandle>> = vec![None; c.joints.len()];
     let mut jhandles: Vec<Option<ImpulseJointHandle>> = vec![None; c.joints.len()];
     for (i, j) in c.joints.iter().enumerate() {
@@ -536,35 +608,48 @@ fn add_character(
         let rb =
             world.insert_body(builder.pose(pose_of(jw)).linear_damping(0.05).angular_damping(0.4).can_sleep(false));
         // collision surfaces with geometry, else the inertial geometry (as endorphin_geo draws it)
-        let mut shapes: Vec<(Shaped, Xf)> = body
+        let flag = |cs: &hexe_geo::endorphin::Collision, k: &str| cs.raw.attr(k) != Some("false");
+        let mut shapes: Vec<(Shaped, Xf, bool, bool)> = body
             .collisions
             .iter()
-            .filter_map(|cs| cs.geom.as_ref().map(|g| (shape_of(g), body.xf.mul(&cs.xf))))
+            .filter_map(|cs| {
+                let (sib, anc) = (flag(cs, "collidesWithSiblings"), flag(cs, "collidesWithAncestors"));
+                cs.geom.as_ref().map(|g| (shape_of(g), body.xf.mul(&cs.xf), sib, anc))
+            })
             .collect();
         // play mode: the foot keeps its inertial box (a flat sole) instead of the collision capsules, so it does not roll
         if rigid_minor
             && ["Heel", "Foot", "Toes"].iter().any(|k| body.name.contains(k))
             && let Some(g) = &body.inertial
         {
-            shapes = vec![(shape_of(g), body.xf)];
+            let (sib, anc) = (shapes.iter().all(|s| s.2), shapes.iter().all(|s| s.3));
+            shapes = vec![(shape_of(g), body.xf, sib, anc)];
         }
         if shapes.is_empty()
             && let Some(g) = &body.inertial
         {
-            shapes.push((shape_of(g), body.xf));
+            shapes.push((shape_of(g), body.xf, true, true));
         }
-        let vol: f32 = shapes.iter().map(|(s, _)| s.volume).sum();
+        let vol: f32 = shapes.iter().map(|(s, ..)| s.volume).sum();
         let mass = body
             .mass()
             .map(|m| if rigid_minor { MASS_REF * (m * DENSITY_SCALE / MASS_REF).powf(MASS_EXP) } else { m })
             .filter(|m| m.is_finite() && *m > 0.0)
             .unwrap_or(vol * FALLBACK_DENSITY)
             .max(MIN_MASS);
-        for (s, local) in shapes {
+        for (s, local, sib, anc) in shapes {
             let share = if vol > 0.0 { s.volume / vol } else { 1.0 };
             let at = Pose::from_parts(v3(local.p), quat_of(&local) * s.rot);
-            let col = s.builder.position(at).mass(mass * share).friction(0.8).restitution(0.0).collision_groups(groups);
-            world.insert_collider(col, Some(rb));
+            let mut col =
+                s.builder.position(at).mass(mass * share).friction(0.8).restitution(0.0).collision_groups(groups);
+            if dynamic {
+                col = col.user_data(tag);
+            }
+            if hooked {
+                col = col.active_hooks(ActiveHooks::FILTER_CONTACT_PAIRS);
+            }
+            let ch = world.insert_collider(col, Some(rb));
+            cols.push((ch, i, sib, anc));
         }
         if let Some(slot) = handles.get_mut(i) {
             *slot = Some(rb);
@@ -582,7 +667,43 @@ fn add_character(
             *s = a;
         }
     }
-    if dynamic {
+    if let Some((_, allowed)) = selfc {
+        // body tree over the body-owning joints: parent body of joint i = anchor of its parent joint
+        let up = |i: usize| c.joints.get(i).and_then(|j| j.parent).and_then(|p| anchor.get(p).copied().flatten());
+        let above = |a: usize, b: usize| {
+            // b strictly above a?
+            let mut k = up(a);
+            for _ in 0..c.joints.len() {
+                match k {
+                    Some(x) if x == b => return true,
+                    Some(x) => k = up(x),
+                    None => return false,
+                }
+            }
+            false
+        };
+        for (x, &(ha, a, sa, aa)) in cols.iter().enumerate() {
+            for &(hb, b, sb, ab) in &cols[x + 1..] {
+                let ok = if a == b || up(a) == Some(b) || up(b) == Some(a) {
+                    false
+                } else if above(a, b) {
+                    aa
+                } else if above(b, a) {
+                    ab
+                } else if up(a) == up(b) {
+                    sa && sb
+                } else {
+                    true
+                };
+                let (Some(ca), Some(cb)) = (world.colliders.get(ha), world.colliders.get(hb)) else { continue };
+                let overlap =
+                    rapier3d::parry::query::intersection_test(ca.position(), ca.shape(), cb.position(), cb.shape())
+                        .unwrap_or(true);
+                if ok && !overlap {
+                    allowed.insert(ordered(ha, hb));
+                }
+            }
+        }
         for (i, j) in c.joints.iter().enumerate() {
             let Some(Some(rb)) = handles.get(i) else { continue };
             let Some(a) = j.parent.and_then(|p| anchor.get(p).copied().flatten()) else { continue };

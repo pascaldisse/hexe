@@ -30,12 +30,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     at[i] = Some((f.5, f.6));
                 }
                 if k == f.1 {
+                    // h55: f.2 = the one-shot dv the exe formula applied at F{start}
                     let (v0, g0) = at[i].unwrap_or((f.5, f.6));
-                    let a = len(f.2);
-                    let dur = (f.1 - f.0) as f32 / 30.0;
                     println!(
-                        "force#{i} F{}..F{} |a| {a:.3} m/s2 body {:.3} kg pushed {:.3} kg impulse {:.4} N s expected dv {:.4} m/s measured body dv {:.4} group dv {:.4} m/s",
-                        f.0, f.1, f.3, f.4, a * f.4 * dur, a * dur, len(sub(v0, f.5)), len(sub(g0, f.6))
+                        "force#{i} F{}..F{} applied dv {:.4} m/s ({:.3} {:.3} {:.3}) body {:.3} kg measured body dv {:.4} group dv {:.4} m/s",
+                        f.0, f.1, len(f.2), f.2[0], f.2[1], f.2[2], f.3, len(sub(v0, f.5)), len(sub(g0, f.6))
                     );
                 }
             }

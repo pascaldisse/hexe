@@ -31,11 +31,12 @@ const RATE_SLOW: f32 = 1.5;
 const RATE_FAST: f32 = 8.0;
 /// Hands never aim farther than this many arm lengths from the shoulder.
 const MAX_AIM: f32 = 1.4;
-/// ForceEvent push: acceleration = `relativeAcceleration` x |Vk| x |g| of the pushed object. |Vk| = the event's own
-/// uniform gizmo scale (`endorphin.exe` ForceEventData getScale = |TransformMatrix row|, setScale clamps <= 50); the
-/// "relative" acceleration is mass-independent: the force is that acceleration x the pushed mass (the target body, or
-/// the whole welded group while a `JoinBodies` hold joins it). Units x|g| UNVERIFIED (the file carries no unit field).
-const FORCE_USES_VK_SCALE: bool = true;
+/// ForceEvent = one-shot linear velocity change (h55, `endorphin.exe` 0x4bd950 -> 0x4bd700 -> 0x4bc850 -> 0x59b2f0
+/// applyImpulseViaVelocity -> Karma SetLinearVelocity(v + dv)), fired once at `startFrameNumber` on every `<Objects>`
+/// body: V = TransformMatrix row 0 (`Vi`, loader 0x578959), COM = mass-weighted over the listed bodies (0x4bd620),
+/// dv_i = V^ |V| max(0, 1 + relAcc |(p_i - COM) x V^|) (|p_i - COM| < 1e-4 -> dv_i = V). No mass, g, dt, spin.
+/// Scene units = Karma metres (Gravity -9.81 raw; no scale between 0x4bc850 and the velocity write).
+const FORCE_COM_EPS: f32 = 1e-4;
 
 /// Swing gains of one joint (from the character calibration set).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -381,29 +382,48 @@ fn pd_align(
     }
 }
 
-/// `<ForceEvent>` made runtime: a constant push on one body for frames `[start, end)`.
+/// `<ForceEvent>` made runtime: one target body of the event; `group` = every resolved `<Objects>` body (COM set).
 pub(crate) struct ForceRt {
     pub(crate) start: i32,
     pub(crate) end: i32,
     pub(crate) body: RigidBodyHandle,
-    pub(crate) point: Vec3,
-    pub(crate) accel: Vec3,
+    pub(crate) group: Vec<RigidBodyHandle>,
+    pub(crate) v: Vec3,
+    pub(crate) rel: f32,
+    pub(crate) fired: bool,
+    /// dv applied at fire time (diagnostics).
+    pub(crate) dv: Vec3,
 }
 
 impl ForceRt {
-    pub(crate) fn active_at(&self, frame: i32) -> bool {
-        frame >= self.start && frame < self.end
+    pub(crate) fn due(&self, frame: i32) -> bool {
+        !self.fired && frame >= self.start
     }
-    /// `mass` = the pushed mass (kg): the body's own, or its welded group's (`Sim::pushed_mass`).
-    pub(crate) fn tick(&self, w: &mut PhysicsWorld, dt: f32, mass: f32) {
+    /// Fire once: dv on `body` per the exe formula (`force_dv`), COM over `group` now.
+    pub(crate) fn fire(&mut self, w: &mut PhysicsWorld) {
+        self.fired = true;
+        let (mut c, mut m) = (Vec3::ZERO, 0.0);
+        for b in self.group.iter().filter_map(|g| w.bodies.get(*g)) {
+            c += b.translation() * b.mass();
+            m += b.mass();
+        }
         let Some(b) = w.bodies.get_mut(self.body) else { return };
-        let f = self.accel * mass * dt;
-        b.apply_impulse_at_point(f, self.point, true);
+        let com = if m > 0.0 { c / m } else { b.translation() };
+        self.dv = force_dv(self.v, self.rel, b.translation() - com);
+        b.set_linvel(b.linvel() + self.dv, true);
     }
 }
 
-pub(crate) fn force_accel(ev: &hexe_geo::endorphin_behaviour::ForceEvent, gravity: f32) -> Vec3 {
-    let dir = v3(ev.xf.k);
-    let scale = if FORCE_USES_VK_SCALE { dir.length() } else { 1.0 };
-    dir.normalize_or_zero() * (ev.relative_acceleration * scale * gravity)
+/// `endorphin.exe` 0x4bc850: velocity change of a body at `r` = p - COM for event vector `v` (row Vi), coefficient `rel`.
+pub(crate) fn force_dv(v: Vec3, rel: f32, r: Vec3) -> Vec3 {
+    if r.length() < FORCE_COM_EPS {
+        return v;
+    }
+    let d = v.normalize_or_zero();
+    d * ((r.cross(d).length() * rel + 1.0) * v.length()).max(0.0)
+}
+
+/// Event vector V = TransformMatrix row 0 (`Vi`).
+pub(crate) fn force_vector(ev: &hexe_geo::endorphin_behaviour::ForceEvent) -> Vec3 {
+    v3(ev.xf.i)
 }

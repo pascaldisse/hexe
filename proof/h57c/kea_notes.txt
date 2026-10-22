@@ -1,0 +1,7 @@
+Kea (Karma) RE notes, endorphin.exe 2.5.2 (partial; disassembly stopped per L67d order)
+0x7db7d0  body integrate (kea_7db7d0.txt)
+0x7c5670  force-zero callback (kea_7c5670.txt)
+0x7ce230  collision pipeline (kea_7ce230.txt)
+0x7db720  <- params block (h / eps / gamma) passed here
+0x7db250  integrator: consumes h only (no gamma/eps) (kea_7db250.txt)
+wstep.txt = world-step disasm around 0x7c2a00 (NaN/Inf checks on body state)

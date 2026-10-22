@@ -1,0 +1,15 @@
+Balcony character01	env min -0.004 F311 RightWristJoint mean -0.0004	self min -0.000 F68 UpperNeckJoint-RightShoulderJoint mean -0.0000
+Balcony character02	env min -0.003 F394 RightFingersJoint mean -0.0002	self min -0.009 F67 RightWristJoint-LeftFingersJoint mean -0.0005
+Balcony character03	env min -0.011 F52 RightFingersJoint mean -0.0012	self min -0.029 F406 RightAnkleJoint-LeftAnkleJoint mean -0.0012
+Balcony character04	env min -0.002 F476 LeftFingersJoint mean -0.0002	self min -0.009 F68 RightFingersJoint-LeftFingersJoint mean -0.0003
+Car character01	env min -0.025 F12 LeftToesJoint mean -0.0013	self min -0.008 F126 RightAnkleJoint-LeftMidFootJoint mean -0.0004
+Car prop01	env min 0.000 F1 root mean 0.0000	self min 0.000 F1 root-root mean 0.0000
+Car prop02	env min -0.000 F557 root mean -0.0000	self min 0.000 F1 root-root mean 0.0000
+CarCrash FBXImport01	env min 0.000 F1 Box01 mean 0.0000	self min 0.000 F1 Box01-Box01 mean 0.0000
+CarCrash character01	env min -0.001 F81 RightToesJoint mean -0.0004	self min -0.018 F65 RightKneeJoint-LeftKneeJoint mean -0.0003
+CarCrash prop01	env min -0.000 F273 root mean -0.0000	self min 0.000 F1 root-root mean 0.0000
+Gymnast FBXImport01	env min 0.000 F1 Bone01 mean 0.0000	self min 0.000 F1 Bone01-Bone01 mean 0.0000
+Gymnast FBXImport02	env min 0.000 F1 Bone01 mean 0.0000	self min 0.000 F1 Bone01-Bone01 mean 0.0000
+Gymnast character01	env min -0.004 F159 LeftElbowJoint mean -0.0003	self min -0.003 F139 UpperNeckJoint-LeftShoulderJoint mean -0.0000
+Sword FBXImport01	env min -0.018 F45 LeftFoot mean -0.0059	self min -0.020 F66 LeftWrist-RightElbow mean -0.0004
+Sword character01	env min -0.017 F89 RightFingersJoint mean -0.0003	self min -0.007 F133 LowerNeckJoint-RightShoulderJoint mean -0.0038

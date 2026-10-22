@@ -1,0 +1,151 @@
+0x007c5670 push ebx
+0x007c5671 mov ebx, dword [esp+0x18]
+0x007c5675 push ebp
+0x007c5676 mov ebp, dword [esp+0x18]
+0x007c567a push esi
+0x007c567b push edi
+0x007c567c xor eax, eax
+0x007c567e xor edi, edi
+0x007c5680 cmp ebx, 0x04 ; 4
+,=< 0x007c5683 jl 0x7c581d
+| 0x007c5689 lea esi, dword [ebx-0x04]
+| 0x007c568c shr esi, 0x02
+| 0x007c568f inc esi
+| 0x007c5690 lea edx, dword [ebp+0x08]
+| 0x007c5693 lea edi, dword [esi*4]
+| 0x007c569a lea ebx, dword [ebx]
+| 0x007c56a0 mov ecx, dword [edx-0x08]
+| 0x007c56a3 mov dword [ecx+0x30], eax
+| 0x007c56a6 mov dword [ecx+0x34], eax
+| 0x007c56a9 mov dword [ecx+0x38], eax
+| 0x007c56ac mov dword [ecx+0x40], eax
+| 0x007c56af mov dword [ecx+0x44], eax
+| 0x007c56b2 mov dword [ecx+0x48], eax
+| 0x007c56b5 mov dword [ecx+0xe0], eax
+| 0x007c56bb mov dword [ecx+0xe4], eax
+| 0x007c56c1 mov dword [ecx+0xe8], eax
+| 0x007c56c7 mov dword [ecx+0xf0], eax
+| 0x007c56cd mov dword [ecx+0xf4], eax
+| 0x007c56d3 mov dword [ecx+0xf8], eax
+| 0x007c56d9 mov dword [ecx+0xb0], eax
+| 0x007c56df mov dword [ecx+0xb4], eax
+| 0x007c56e5 mov dword [ecx+0xb8], eax
+| 0x007c56eb mov dword [ecx+0xc0], eax
+| 0x007c56f1 mov dword [ecx+0xc4], eax
+| 0x007c56f7 mov dword [ecx+0xc8], eax
+| 0x007c56fd mov ecx, dword [edx-0x04]
+| 0x007c5700 mov dword [ecx+0x30], eax
+| 0x007c5703 mov dword [ecx+0x34], eax
+| 0x007c5706 mov dword [ecx+0x38], eax
+| 0x007c5709 mov dword [ecx+0x40], eax
+| 0x007c570c mov dword [ecx+0x44], eax
+| 0x007c570f mov dword [ecx+0x48], eax
+| 0x007c5712 mov dword [ecx+0xe0], eax
+| 0x007c5718 mov dword [ecx+0xe4], eax
+| 0x007c571e mov dword [ecx+0xe8], eax
+| 0x007c5724 mov dword [ecx+0xf0], eax
+| 0x007c572a mov dword [ecx+0xf4], eax
+| 0x007c5730 mov dword [ecx+0xf8], eax
+| 0x007c5736 mov dword [ecx+0xb0], eax
+| 0x007c573c mov dword [ecx+0xb4], eax
+| 0x007c5742 mov dword [ecx+0xb8], eax
+| 0x007c5748 mov dword [ecx+0xc0], eax
+| 0x007c574e mov dword [ecx+0xc4], eax
+| 0x007c5754 mov dword [ecx+0xc8], eax
+| 0x007c575a mov ecx, dword [edx]
+| 0x007c575c mov dword [ecx+0x30], eax
+| 0x007c575f mov dword [ecx+0x34], eax
+| 0x007c5762 mov dword [ecx+0x38], eax
+| 0x007c5765 mov dword [ecx+0x40], eax
+| 0x007c5768 mov dword [ecx+0x44], eax
+| 0x007c576b mov dword [ecx+0x48], eax
+| 0x007c576e invalid
+| 0x007c576f invalid
+| 0x007c5770 loopne 0x7c5772
+| 0x007c5772 add byte [eax], al
+| 0x007c5774 mov dword [ecx+0xe4], eax
+| 0x007c577a mov dword [ecx+0xe8], eax
+| 0x007c5780 mov dword [ecx+0xf0], eax
+| 0x007c5786 mov dword [ecx+0xf4], eax
+| 0x007c578c mov dword [ecx+0xf8], eax
+| 0x007c5792 mov dword [ecx+0xb0], eax
+| 0x007c5798 mov dword [ecx+0xb4], eax
+| 0x007c579e mov dword [ecx+0xb8], eax
+| 0x007c57a4 mov dword [ecx+0xc0], eax
+| 0x007c57aa mov dword [ecx+0xc4], eax
+| 0x007c57b0 mov dword [ecx+0xc8], eax
+| 0x007c57b6 mov ecx, dword [edx+0x04]
+| 0x007c57b9 mov dword [ecx+0x30], eax
+| 0x007c57bc mov dword [ecx+0x34], eax
+| 0x007c57bf mov dword [ecx+0x38], eax
+| 0x007c57c2 mov dword [ecx+0x40], eax
+| 0x007c57c5 mov dword [ecx+0x44], eax
+| 0x007c57c8 mov dword [ecx+0x48], eax
+| 0x007c57cb mov dword [ecx+0xe0], eax
+| 0x007c57d1 mov dword [ecx+0xe4], eax
+| 0x007c57d7 mov dword [ecx+0xe8], eax
+| 0x007c57dd mov dword [ecx+0xf0], eax
+| 0x007c57e3 mov dword [ecx+0xf4], eax
+| 0x007c57e9 mov dword [ecx+0xf8], eax
+| 0x007c57ef mov dword [ecx+0xb0], eax
+| 0x007c57f5 mov dword [ecx+0xb4], eax
+| 0x007c57fb mov dword [ecx+0xb8], eax
+| 0x007c5801 add edx, 0x10 ; 16
+| 0x007c5804 dec esi
+| 0x007c5805 mov dword [ecx+0xc0], eax
+| 0x007c580b mov dword [ecx+0xc4], eax
+| 0x007c5811 mov dword [ecx+0xc8], eax
+| 0x007c5817 jnz 0x7c56a0
+`-> 0x007c581d cmp edi, ebx
+0x007c581f jnl 0x7c5884
+0x007c5821 mov ecx, dword [ebp+edi*4]
+0x007c5825 mov dword [ecx+0x30], eax
+0x007c5828 mov dword [ecx+0x34], eax
+0x007c582b mov dword [ecx+0x38], eax
+0x007c582e mov dword [ecx+0x40], eax
+0x007c5831 mov dword [ecx+0x44], eax
+0x007c5834 mov dword [ecx+0x48], eax
+0x007c5837 mov dword [ecx+0xe0], eax
+0x007c583d mov dword [ecx+0xe4], eax
+0x007c5843 mov dword [ecx+0xe8], eax
+0x007c5849 mov dword [ecx+0xf0], eax
+0x007c584f mov dword [ecx+0xf4], eax
+0x007c5855 mov dword [ecx+0xf8], eax
+0x007c585b mov dword [ecx+0xb0], eax
+0x007c5861 mov dword [ecx+0xb4], eax
+0x007c5867 mov dword [ecx+0xb8], eax
+0x007c586d inc edi
+0x007c586e cmp edi, ebx
+0x007c5870 mov dword [ecx+0xc0], eax
+0x007c5876 mov dword [ecx+0xc4], eax
+0x007c587c mov dword [ecx+0xc8], eax
+0x007c5882 jl 0x7c5821
+0x007c5884 mov ecx, dword [esp+0x18]
+0x007c5888 cmp ecx, eax
+0x007c588a jle 0x7c58bc
+0x007c588c mov edx, dword [esp+0x14]
+0x007c5890 mov esi, ecx
+0x007c5892 mov ecx, 0x20 ; 32
+0x007c5897 mov edi, dword [edx]
+0x007c5899 mov dword [ecx+edi*1-0x20], eax
+0x007c589d mov edi, dword [edx]
+0x007c589f mov dword [ecx+edi*1-0x10], eax
+0x007c58a3 mov edi, dword [edx]
+0x007c58a5 mov dword [ecx+edi*1], eax
+0x007c58a8 mov edi, dword [edx]
+0x007c58aa mov dword [ecx+edi*1+0x10], eax
+0x007c58ae add ecx, 0x04
+0x007c58b1 cmp ecx, 0x2c ; ',' ; 44
+0x007c58b4 jnz 0x7c5897
+0x007c58b6 add edx, 0x04
+0x007c58b9 dec esi
+0x007c58ba jnz 0x7c5892
+0x007c58bc push str.MdtDefaultSimErrorCallBack:_Error_in_simulation. ; 0x974754 ; "MdtDefaul
+0x007c58c1 push eax
+0x007c58c2 call 0x7d5ab0
+0x007c58c7 add esp, 0x08
+0x007c58ca pop edi
+0x007c58cb pop esi
+0x007c58cc pop ebp
+0x007c58cd pop ebx
+0x007c58ce ret 0x18

@@ -25,6 +25,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(e) = num("HOLD_EPS") {
         sim.hold_eps = e;
     }
+    // h57b noise floor: HOLD_PERTURB=<rel> scales every nonzero strength of the first hold by (1 + rel)
+    if let (Some(r), Some(h)) = (num("HOLD_PERTURB"), sim.holds_mut().first_mut()) {
+        for v in h.strength.0.iter_mut().chain(h.strength.1.iter_mut()) {
+            *v *= 1.0 + r;
+        }
+    }
     // FORCES=1 -> per <ForceEvent> target: accel, masses, impulse N s, measured dv of the body and of its pushed group
     if std::env::var("FORCES").is_ok() {
         let last = sim.force_diag().iter().map(|f| f.1).max().unwrap_or(0);

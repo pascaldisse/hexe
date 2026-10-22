@@ -756,6 +756,10 @@ impl Sim {
     pub fn holds(&self) -> &[HoldRt] {
         &self.holds
     }
+    /// Mutable holds (sensitivity probes: perturb a strength before stepping).
+    pub fn holds_mut(&mut self) -> &mut [HoldRt] {
+        &mut self.holds
+    }
     /// World centre of mass of the rigid body of MetaBody `body` of `ch` (prop body frames sit at the world origin) and
     /// whether it is dynamic.
     pub fn body_pos(&self, scene: &Scene, ch: &str, body: &str) -> Option<([f32; 3], bool)> {

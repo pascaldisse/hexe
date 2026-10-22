@@ -725,16 +725,17 @@ impl Sim {
                 self.catches.push(c);
             }
         }
-        let g = self.world.gravity.length();
         for ev in scene.force_events().into_iter().filter(|_| opt.forces) {
             if ev.end <= ev.start {
                 continue;
             }
-            let accel = behaviour::force_accel(&ev, g);
-            for (ch, body) in &ev.targets {
+            let v = behaviour::force_vector(&ev);
+            let group: Vec<RigidBodyHandle> = ev.targets.iter().filter_map(|(ch, body)| self.body_of(scene, ch, body)).collect();
+            for &h in &group {
                 // fixed bodies (static environment props) ignore the push
-                if let Some(h) = self.body_of(scene, ch, body).filter(|h| self.world.bodies.get(*h).is_some_and(|b| b.is_dynamic())) {
-                    self.forces.push(ForceRt { start: ev.start, end: ev.end, body: h, point: v3(ev.xf.p), accel });
+                if self.world.bodies.get(h).is_some_and(|b| b.is_dynamic()) {
+                    let (start, end, rel) = (ev.start, ev.end, ev.relative_acceleration);
+                    self.forces.push(ForceRt { start, end, body: h, group: group.clone(), v, rel, fired: false, dv: Vec3::ZERO });
                 }
             }
         }
@@ -825,10 +826,9 @@ impl Sim {
             }
             if !(self.catches.is_empty() && self.forces.is_empty()) {
                 let frame = ((self.time + sub * k as f32) * behaviour::FRAME_RATE + 1e-3).floor() as i32;
-                for f in &self.forces {
-                    if f.active_at(frame) {
-                        let m = self.pushed_mass(f.body);
-                        f.tick(&mut self.world, sub, m);
+                for f in &mut self.forces {
+                    if f.due(frame) {
+                        f.fire(&mut self.world);
                     }
                 }
                 for c in &mut self.catches {
@@ -1003,7 +1003,7 @@ impl Sim {
                 (
                     f.start,
                     f.end,
-                    f.accel.to_array(),
+                    f.dv.to_array(),
                     b.map_or(0.0, |b| b.mass()),
                     m,
                     b.map_or([0.0; 3], |b| b.linvel().to_array()),

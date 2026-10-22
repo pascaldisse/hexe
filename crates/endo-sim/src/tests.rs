@@ -275,11 +275,13 @@ fn behaviours_without_the_arm_chain_or_character_are_ignored() {
 #[test]
 fn force_event_maps_direction_and_scale() {
     use hexe_geo::endorphin_behaviour::ForceEvent;
-    let n = parse_xml("<ForceEvent character=\"a\" brelativeAcceleration=\"3e4ccccd\"><TransformMatrix><Vk bx=\"c1400000\" by=\"0\" bz=\"0\"/></TransformMatrix></ForceEvent>").unwrap();
-    let a = behaviour::force_accel(&ForceEvent::from_node(&n), 10.0);
-    assert!((a.x + 24.0).abs() < 1e-4 && a.y.abs() < 1e-6 && a.z.abs() < 1e-6, "{a:?}");
-    let none = parse_xml("<ForceEvent/>").unwrap();
-    assert_eq!(behaviour::force_accel(&ForceEvent::from_node(&none), 10.0), Vec3::ZERO);
+    let n = parse_xml("<ForceEvent character=\"a\" brelativeAcceleration=\"3e4ccccd\"><TransformMatrix><Vi bx=\"c1400000\" by=\"0\" bz=\"0\"/></TransformMatrix></ForceEvent>").unwrap();
+    let v = behaviour::force_vector(&ForceEvent::from_node(&n));
+    assert_eq!(v, Vec3::new(-12.0, 0.0, 0.0));
+    assert_eq!(behaviour::force_dv(v, 0.2, Vec3::ZERO), v);
+    // 1 m off the push line: |V| (1 + 0.2 x 1)
+    let d = behaviour::force_dv(v, 0.2, Vec3::Y);
+    assert!((d.x + 14.4).abs() < 1e-4 && d.y.abs() < 1e-6, "{d:?}");
 }
 
 /// One-body prop character 2 m above a default ground, keyed along +x by the scene timeline

@@ -8,5 +8,5 @@ Car prop02	env min -0.000 F110 root mean -0.0000	self min 0.000 F1 root-root mea
 Gymnast FBXImport01	env min -0.002 F40 Bone01 mean -0.0001	self min 0.000 F1 Bone01-Bone01 mean 0.0000
 Gymnast FBXImport02	env min -0.029 F1 Bone48 mean -0.0002	self min 0.000 F1 Bone01-Bone01 mean 0.0000
 Gymnast character01	env min -0.004 F1 LeftWristJoint mean -0.0005	self min -0.000 F173 UpperNeckJoint-LeftShoulderJoint mean -0.0000
-Sword FBXImport01	env min -0.018 F45 LeftFoot mean -0.0060	self min -0.044 F292 LeftWrist-RightShoulder mean -0.0003
-Sword character01	env min -0.006 F65 RightFingersJoint mean -0.0005	self min -0.004 F85 RightShoulderJoint-LeftClavicleJoint mean -0.0008
+Sword FBXImport01	env min -0.018 F45 LeftFoot mean -0.0059	self min -0.020 F66 LeftWrist-RightElbow mean -0.0004
+Sword character01	env min -0.006 F65 RightFingersJoint mean -0.0006	self min -0.004 F85 RightShoulderJoint-LeftClavicleJoint mean -0.0001

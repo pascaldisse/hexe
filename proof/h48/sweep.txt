@@ -1,0 +1,141 @@
+### 
+Balcony  character01  env -0.009 mean -0.0016 | self -0.000 mean 
+Balcony  character02  env -0.002 mean -0.0013 | self -0.006 mean 
+Balcony  character03  env -0.002 mean -0.0014 | self -0.006 mean 
+Balcony  character04  env -0.042 mean -0.0017 | self -0.006 mean 
+Car Hit  character01  env -0.058 mean -0.0016 | self -0.015 mean 
+Car Hit  prop01       env 0.000 mean 0.0000 | self 0.000 mean 
+Car Hit  prop02       env -0.000 mean -0.0000 | self 0.000 mean 
+Gymnast  FBXImport01  env -0.001 mean -0.0003 | self 0.000 mean 
+Gymnast  FBXImport02  env -0.029 mean -0.0004 | self 0.000 mean 
+Gymnast  character01  env -0.007 mean -0.0015 | self -0.007 mean 
+Sword Pl FBXImport01  env -0.018 mean -0.0118 | self -0.023 mean 
+Sword Pl character01  env -0.006 mean -0.0012 | self -0.006 mean 
+### XLE=0.001
+Balcony  character01  env -0.009 mean -0.0016 | self -0.000 mean 
+Balcony  character02  env -0.418 mean -0.0028 | self -0.006 mean 
+Balcony  character03  env -0.002 mean -0.0014 | self -0.006 mean 
+Balcony  character04  env -0.042 mean -0.0017 | self -0.005 mean 
+Car Hit  character01  env -0.250 mean -0.0021 | self -0.012 mean 
+Car Hit  prop01       env 0.000 mean 0.0000 | self 0.000 mean 
+Car Hit  prop02       env -0.000 mean -0.0000 | self 0.000 mean 
+Gymnast  FBXImport01  env -0.004 mean -0.0003 | self 0.000 mean 
+Gymnast  FBXImport02  env -0.029 mean -0.0004 | self 0.000 mean 
+Gymnast  character01  env -0.005 mean -0.0016 | self -0.015 mean 
+Sword Pl FBXImport01  env -0.018 mean -0.0118 | self -0.023 mean 
+Sword Pl character01  env -0.408 mean -0.0034 | self -0.010 mean 
+### XREC=0
+Balcony  character01  env -0.009 mean -0.0016 | self -0.000 mean 
+Balcony  character02  env -0.002 mean -0.0013 | self -0.006 mean 
+Balcony  character03  env -0.002 mean -0.0014 | self -0.006 mean 
+Balcony  character04  env -0.042 mean -0.0017 | self -0.006 mean 
+Car Hit  character01  env -0.058 mean -0.0016 | self -0.015 mean 
+Car Hit  prop01       env 0.000 mean 0.0000 | self 0.000 mean 
+Car Hit  prop02       env -0.000 mean -0.0000 | self 0.000 mean 
+Gymnast  FBXImport01  env -0.001 mean -0.0003 | self 0.000 mean 
+Gymnast  FBXImport02  env -0.029 mean -0.0004 | self 0.000 mean 
+Gymnast  character01  env -0.007 mean -0.0015 | self -0.007 mean 
+Sword Pl FBXImport01  env -0.018 mean -0.0118 | self -0.023 mean 
+Sword Pl character01  env -0.006 mean -0.0012 | self -0.006 mean 
+### XCCD=1
+Balcony  character01  env -0.009 mean -0.0016 | self -0.000 mean 
+Balcony  character02  env -0.002 mean -0.0013 | self -0.006 mean 
+Balcony  character03  env -0.002 mean -0.0014 | self -0.006 mean 
+Balcony  character04  env -0.042 mean -0.0017 | self -0.006 mean 
+Car Hit  character01  env -0.058 mean -0.0016 | self -0.015 mean 
+Car Hit  prop01       env 0.000 mean 0.0000 | self 0.000 mean 
+Car Hit  prop02       env -0.000 mean -0.0000 | self 0.000 mean 
+Gymnast  FBXImport01  env -0.001 mean -0.0003 | self 0.000 mean 
+Gymnast  FBXImport02  env -0.029 mean -0.0004 | self 0.000 mean 
+Gymnast  character01  env -0.007 mean -0.0015 | self -0.007 mean 
+Sword Pl FBXImport01  env -0.018 mean -0.0118 | self -0.023 mean 
+Sword Pl character01  env -0.018 mean -0.0013 | self -0.006 mean 
+### XHZ=60
+Balcony  character01  env -0.004 mean -0.0006 | self 0.000 mean 
+Balcony  character02  env -4.450 mean -0.0159 | self -0.002 mean 
+Balcony  character03  env -0.035 mean -0.0006 | self -0.002 mean 
+Balcony  character04  env -0.080 mean -0.0006 | self -0.002 mean 
+Car Hit  character01  env -28.289 mean -0.0951 | self -0.007 mean 
+Car Hit  prop01       env 0.000 mean 0.0000 | self 0.000 mean 
+Car Hit  prop02       env -0.000 mean -0.0000 | self 0.000 mean 
+Gymnast  FBXImport01  env -0.000 mean -0.0001 | self 0.000 mean 
+Gymnast  FBXImport02  env -0.029 mean -0.0002 | self 0.000 mean 
+Gymnast  character01  env -0.004 mean -0.0005 | self -0.003 mean 
+Sword Pl FBXImport01  env -0.018 mean -0.0118 | self -0.020 mean 
+Sword Pl character01  env -0.006 mean -0.0005 | self 0.000 mean 
+### XLE=0.001 XREC=0 XCCD=1 XHZ=60
+Balcony  character01  env -0.004 mean -0.0006 | self 0.000 mean 
+Balcony  character02  env -4.450 mean -0.0157 | self -0.002 mean 
+Balcony  character03  env -0.002 mean -0.0005 | self -0.002 mean 
+Balcony  character04  env -0.041 mean -0.0005 | self -0.002 mean 
+Car Hit  character01  env -0.025 mean -0.0007 | self -0.009 mean 
+Car Hit  prop01       env 0.000 mean 0.0000 | self 0.000 mean 
+Car Hit  prop02       env -0.000 mean -0.0000 | self 0.000 mean 
+Gymnast  FBXImport01  env -0.000 mean -0.0001 | self 0.000 mean 
+Gymnast  FBXImport02  env -0.029 mean -0.0002 | self 0.000 mean 
+Gymnast  character01  env -0.004 mean -0.0004 | self -0.001 mean 
+Sword Pl FBXImport01  env -0.018 mean -0.0118 | self -0.020 mean 
+Sword Pl character01  env -0.008 mean -0.0007 | self 0.000 mean 
+### XIT=8
+Balcony  character01  env -0.009 mean -0.0017 | self 0.000 mean 
+Balcony  character02  env -0.086 mean -0.0017 | self -0.006 mean 
+Balcony  character03  env -0.002 mean -0.0014 | self -0.005 mean 
+Balcony  character04  env -0.021 mean -0.0013 | self -0.006 mean 
+Car Hit  character01  env -0.025 mean -0.0011 | self -0.016 mean 
+Car Hit  prop01       env 0.000 mean 0.0000 | self 0.000 mean 
+Car Hit  prop02       env -0.000 mean -0.0000 | self 0.000 mean 
+Gymnast  FBXImport01  env -0.003 mean -0.0004 | self 0.000 mean 
+Gymnast  FBXImport02  env -0.046 mean -0.0006 | self 0.000 mean 
+Gymnast  character01  env -0.008 mean -0.0016 | self 0.000 mean 
+Sword Pl FBXImport01  env -0.018 mean -0.0118 | self -0.020 mean 
+Sword Pl character01  env -0.006 mean -0.0012 | self -0.004 mean 
+### XHZ=60 XIT=8
+Balcony  character01  env -0.004 mean -0.0006 | self 0.000 mean 
+Balcony  character02  env -0.025 mean -0.0006 | self -0.004 mean 
+Balcony  character03  env -0.002 mean -0.0004 | self -0.003 mean 
+Balcony  character04  env -0.031 mean -0.0006 | self -0.002 mean 
+Car Hit  character01  env -0.025 mean -0.0007 | self -0.010 mean 
+Gymnast  FBXImport02  env -0.029 mean -0.0002 | self 0.000 mean 
+Gymnast  character01  env -0.004 mean -0.0004 | self -0.000 mean 
+Sword Pl character01  env -0.006 mean -0.0005 | self 0.000 mean 
+real	0m4.021s
+### XCCD=1 XIT=8
+Balcony  character01  env -0.009 mean -0.0017 | self 0.000 mean 
+Balcony  character02  env -0.086 mean -0.0017 | self -0.006 mean 
+Balcony  character03  env -0.002 mean -0.0014 | self -0.005 mean 
+Balcony  character04  env -0.021 mean -0.0013 | self -0.006 mean 
+Car Hit  character01  env -0.025 mean -0.0011 | self -0.016 mean 
+Gymnast  FBXImport02  env -0.046 mean -0.0006 | self 0.000 mean 
+Gymnast  character01  env -0.008 mean -0.0016 | self 0.000 mean 
+Sword Pl character01  env -0.006 mean -0.0012 | self -0.004 mean 
+real	0m4.083s
+### XHZ=60 XCCD=1 XIT=8
+Balcony  character01  env -0.004 mean -0.0006 | self 0.000 mean 
+Balcony  character02  env -0.025 mean -0.0006 | self -0.004 mean 
+Balcony  character03  env -0.002 mean -0.0004 | self -0.003 mean 
+Balcony  character04  env -0.031 mean -0.0006 | self -0.002 mean 
+Car Hit  character01  env -0.025 mean -0.0007 | self -0.010 mean 
+Gymnast  FBXImport02  env -0.029 mean -0.0002 | self 0.000 mean 
+Gymnast  character01  env -0.004 mean -0.0004 | self -0.000 mean 
+Sword Pl character01  env -0.006 mean -0.0005 | self 0.000 mean 
+real	0m4.144s
+### XHZ=45 XCCD=1 XIT=8
+Balcony  character01  env -0.004 mean -0.0011 | self 0.000 mean 
+Balcony  character02  env -0.001 mean -0.0007 | self -0.004 mean 
+Balcony  character03  env -0.006 mean -0.0008 | self -0.003 mean 
+Balcony  character04  env -0.111 mean -0.0011 | self -0.004 mean 
+Car Hit  character01  env -0.025 mean -0.0008 | self -0.006 mean 
+Gymnast  FBXImport02  env -0.029 mean -0.0003 | self 0.000 mean 
+Gymnast  character01  env -0.006 mean -0.0008 | self -0.000 mean 
+Sword Pl character01  env -0.012 mean -0.0008 | self -0.001 mean 
+real	0m4.102s
+### XHZ=60 XCCD=1 XIT=6
+Balcony  character01  env -0.004 mean -0.0005 | self -0.000 mean 
+Balcony  character02  env -27.524 mean -0.0926 | self -0.002 mean 
+Balcony  character03  env -0.010 mean -0.0005 | self -0.002 mean 
+Balcony  character04  env -0.117 mean -0.0010 | self -0.002 mean 
+Car Hit  character01  env -0.025 mean -0.0007 | self -0.004 mean 
+Gymnast  FBXImport02  env -0.062 mean -0.0004 | self 0.000 mean 
+Gymnast  character01  env -0.004 mean -0.0003 | self -0.100 mean 
+Sword Pl character01  env -0.016 mean -0.0004 | self -0.003 mean 
+real	0m3.465s

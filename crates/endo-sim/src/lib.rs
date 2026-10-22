@@ -35,7 +35,11 @@ const MAX_SUBSTEP: f32 = 1.0 / 120.0;
 const MAX_SUBSTEP_PLAY: f32 = 1.0 / 240.0;
 const MAX_SUBSTEPS: usize = 128;
 /// Solver iterations with the `secondary` layer on (rapier's default of 1 lets the motor chains sag).
-const PLAY_SOLVER_ITERS: usize = 4;
+/// 8: at 4 the soft contacts let feet / hands sink 2-6 cm into floor and balcony slabs (clearance h48).
+const PLAY_SOLVER_ITERS: usize = 8;
+/// Contact stiffness (Hz) of the PLAY build; static contacts get twice that (rapier's ratio). Rapier's 30 Hz default
+/// leaves a ~1.5 mm mean sink and lets a fast limb sit half through a thin slab, where the normal can flip.
+const PLAY_CONTACT_HZ: f32 = 60.0;
 /// Density for bodies whose mass the file does not give (water-ish, like a body).
 const FALLBACK_DENSITY: f32 = 1000.0;
 const MIN_MASS: f32 = 0.05;
@@ -330,6 +334,16 @@ impl Sim {
         sim.add_behaviours(scene, opt);
         if opt.secondary {
             sim.world.integration_parameters.num_solver_iterations = PLAY_SOLVER_ITERS;
+            let ip = &mut sim.world.integration_parameters;
+            ip.contact_softness.natural_frequency = PLAY_CONTACT_HZ;
+            ip.static_contact_softness.natural_frequency = 2.0 * PLAY_CONTACT_HZ;
+            let dynamic: Vec<RigidBodyHandle> =
+                sim.world.bodies.iter().filter(|(_, b)| b.is_dynamic()).map(|(h, _)| h).collect();
+            for h in dynamic {
+                if let Some(b) = sim.world.bodies.get_mut(h) {
+                    b.enable_ccd(true);
+                }
+            }
             sim.behave = Some(behave::Behave::build(scene, &sim.rigs, &sim.world));
         }
         sim
@@ -554,6 +568,15 @@ impl Sim {
                 for c in b.colliders().iter().filter_map(|h| self.world.colliders.get(*h)) {
                     if let Some(m) = c.shape().as_support_map() {
                         pts.push(m.support_point(c.position(), -Vec3::Y));
+                    }
+                    // shape-shape overlap: catches a limb stuck through a thin slab whose lowest point is already below it
+                    for s in &statics {
+                        if let Ok(Some(k)) =
+                            rapier3d::parry::query::contact(c.position(), c.shape(), s.position(), s.shape(), 0.0)
+                            && k.dist < best.0
+                        {
+                            best = (k.dist, j);
+                        }
                     }
                 }
                 for p in pts {

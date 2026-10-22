@@ -1,0 +1,28 @@
+Balcony  character01  env -0.004 mean -0.0006 | self 0.000 mean 
+Balcony  character02  env -0.025 mean -0.0006 | self -0.004 mean 
+Balcony  character03  env -0.002 mean -0.0004 | self -0.003 mean 
+Balcony  character04  env -0.031 mean -0.0006 | self -0.002 mean 
+Car Hit  character01  env -0.025 mean -0.0007 | self -0.010 mean 
+Car Hit  prop01       env 0.000 mean 0.0000 | self 0.000 mean 
+Car Hit  prop02       env -0.000 mean -0.0000 | self 0.000 mean 
+Gymnast  FBXImport01  env -0.000 mean -0.0001 | self 0.000 mean 
+Gymnast  FBXImport02  env -0.029 mean -0.0002 | self 0.000 mean 
+Gymnast  character01  env -0.004 mean -0.0004 | self -0.000 mean 
+Sword Pl FBXImport01  env -0.018 mean -0.0118 | self -0.026 mean 
+Sword Pl character01  env -0.006 mean -0.0005 | self 0.000 mean 
+## 150 frames
+character01	env min -0.004 F1 LeftAnkleJoint mean -0.0008
+character02	env min -0.025 F127 LeftMidFootJoint mean -0.0006
+character03	env min -0.002 F1 root mean -0.0004
+character04	env min -0.031 F35 LeftAnkleJoint mean -0.0008
+character01	env min -0.025 F12 LeftToesJoint mean -0.0010
+prop01	env min 0.000 F1 root mean 0.0000
+prop02	env min -0.000 F97 root mean -0.0000
+## 600 frames
+character01	env min -0.004 F1 LeftAnkleJoint mean -0.0004
+character02	env min -0.129 F316 LeftMidFootJoint mean -0.0008
+character03	env min -0.005 F463 LeftToesJoint mean -0.0003
+character04	env min -0.053 F552 RightAnkleJoint mean -0.0006
+character01	env min -0.183 F424 RightClavicleJoint mean -0.0011
+prop01	env min 0.000 F1 root mean 0.0000
+prop02	env min -0.000 F528 root mean -0.0000

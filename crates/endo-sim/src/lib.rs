@@ -53,6 +53,10 @@ pub const KARMA_GAMMA: f32 = 0.2;
 /// `[w+0x21c] = 0.01 / massScale` (massScale `[w+0x1b0]` = NM `[+0x30]` = 1.0, ctor 0x636d66); MdtWorldSetEpsilon
 /// 0x7c25d0 gated like gamma (0x636c59, `[+0x14] == -1`).
 pub const KARMA_EPSILON: f32 = 0.01;
+/// Hold-row CFM actually used: Karma eps (0.01) -> Rapier cfm unit mapping is NOT derived (Kea diagonal scaling unread,
+/// proof/h57c/kea_notes.txt); a 1:1 copy regresses Balcony ch03 env -1 -> -11 mm outside both noise spreads
+/// (proof/h57c/ab_summary.txt: gamma 0.2 eps 1 = -2 mm). Keep eps 1 until the Kea mapping is read.
+pub const HOLD_EPSILON: f32 = 1.0;
 /// Karma world step (s): NM world ctor 0x636d41 `[+0x08] = 1/120`. Hold rows map (gamma, eps) at this step.
 pub const KARMA_STEP: f32 = 1.0 / 120.0;
 /// Placeholder half extents of unknown (`File`/`Mesh`) geometry: the 5 cm box `endorphin_geo` draws.
@@ -634,7 +638,7 @@ impl Sim {
             holds: Vec::new(),
             force_welded: true,
             hold_gamma: KARMA_GAMMA,
-            hold_eps: KARMA_EPSILON,
+            hold_eps: HOLD_EPSILON,
         };
         sim.add_behaviours(scene, opt);
         if opt.secondary {

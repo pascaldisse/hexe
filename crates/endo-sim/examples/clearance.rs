@@ -29,6 +29,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         return Ok(());
     }
+    // PAIRS=name:frame -> the overlapping (collider, static) pairs at that frame and the solver's view of each
+    if let Ok(w) = std::env::var("PAIRS") {
+        let (who, at) = w.split_once(':').unwrap_or((&w, "1"));
+        let at: usize = at.parse().unwrap_or(1);
+        for _ in 1..at {
+            sim.step(1.0 / 30.0);
+        }
+        sim.env_pairs(who).iter().for_each(|l| println!("F{at} {l}"));
+        return Ok(());
+    }
     if let Ok(v) = std::env::var("SELF") {
         sim.set_self_collision(v != "0");
     }

@@ -748,6 +748,70 @@ impl Sim {
         }
         out
     }
+    /// Diagnostics: every (collider of `character`, static collider) pair overlapping now, with the solver's view of it:
+    /// `owner/joint shape groups depth | narrow-phase pair? active contact? manifold points, solver flags`.
+    pub fn env_pairs(&self, character: &str) -> Vec<String> {
+        let who = |h: ColliderHandle| -> String {
+            let Some(p) = self.world.colliders.get(h).and_then(|c| c.parent()) else { return "ground".into() };
+            self.rigs
+                .iter()
+                .find_map(|r| r.handles.iter().position(|x| *x == Some(p)).map(|j| format!("{}/{}", r.name, r.names[j])))
+                .unwrap_or_else(|| "?".into())
+        };
+        let desc = |h: ColliderHandle, c: &Collider| {
+            let g = c.collision_groups();
+            format!(
+                "{} {:?} {:?} m={:x} f={:x} sg={:x}/{:x} sensor={} hooks={:?}",
+                who(h),
+                h.into_raw_parts(),
+                c.shape().shape_type(),
+                g.memberships.bits(),
+                g.filter.bits(),
+                c.solver_groups().memberships.bits(),
+                c.solver_groups().filter.bits(),
+                c.is_sensor(),
+                c.active_hooks()
+            )
+        };
+        let Some(r) = self.rigs.iter().find(|r| r.name == character) else { return Vec::new() };
+        let mut out = Vec::new();
+        for b in r.handles.iter().flatten().filter_map(|h| self.world.bodies.get(*h)) {
+            for &ha in b.colliders() {
+                let Some(a) = self.world.colliders.get(ha) else { continue };
+                for (hs, s) in self.world.colliders.iter() {
+                    if !s.parent().and_then(|p| self.world.bodies.get(p)).is_none_or(|b| b.is_fixed()) {
+                        continue;
+                    }
+                    let d = overlap_depth(a, s);
+                    if d >= 0.0 {
+                        continue;
+                    }
+                    let cp = self.world.narrow_phase.contact_pair(ha, hs);
+                    let pts: usize = cp.map_or(0, |p| p.manifolds.iter().map(|m| m.points.len()).sum());
+                    let flags = cp.and_then(|p| p.manifolds.first()).map(|m| m.data.solver_flags);
+                    // solver's own depth (manifold) vs parry's exact contact (EPA)
+                    let md = cp
+                        .iter()
+                        .flat_map(|p| p.manifolds.iter())
+                        .flat_map(|m| m.points.iter())
+                        .map(|p| p.dist)
+                        .fold(f32::INFINITY, f32::min);
+                    let k = rapier3d::parry::query::contact(a.position(), a.shape(), s.position(), s.shape(), 0.0)
+                        .ok()
+                        .flatten()
+                        .map(|k| k.dist);
+                    out.push(format!(
+                        "d={d:.4} manifold={md:.4} epa={k:?} | {} | {} | pair={} active={} pts={pts} flags={flags:?}",
+                        desc(ha, a),
+                        desc(hs, s),
+                        cp.is_some(),
+                        cp.is_some_and(|p| p.has_any_active_contact())
+                    ));
+                }
+            }
+        }
+        out
+    }
     /// Names of the dynamic (simulated) characters.
     pub fn dynamic_characters(&self) -> Vec<&str> {
         self.rigs.iter().filter(|r| r.dynamic).map(|r| r.name.as_str()).collect()
@@ -760,17 +824,49 @@ impl Sim {
 }
 
 /// `-depth` (m) of `a` overlapping the static `b`, 0 if apart. Cuboids: separating axes over `b`'s face normals with `a`'s
-/// support map (parry's EPA reports bogus 10-20 cm depths against the 100 m ground box: witness point 50-100 m off).
+/// support map (parry's EPA reports bogus 10-20 cm depths against the 100 m ground box: witness point 50-100 m off),
+/// plus the edge x edge axes (`a`'s box axes / capsule-cylinder axis x `b`'s box axes) and EPA's normal, each measured
+/// exactly with both support maps: every axis bounds the true depth from above, so the minimum never under-reports a
+/// sink. Face axes alone over-report an edge contact (h51: Balcony ch04 shoulder capsule on the chair-seat edge read
+/// -1.3..-2.1 cm while the solver manifold and EPA said ~0).
 fn overlap_depth(a: &Collider, b: &Collider) -> f32 {
-    if let (Some(bx), Some(m)) = (b.shape().as_cuboid(), a.shape().as_support_map()) {
+    if let (Some(bx), Some(m), Some(mb)) = (b.shape().as_cuboid(), a.shape().as_support_map(), b.shape().as_support_map())
+    {
         let (r, o) = (b.position().rotation, b.position().translation);
+        let unit = |k: usize| Vec3::from_array(std::array::from_fn(|i| if i == k { 1.0 } else { 0.0 }));
         let mut pen = f32::INFINITY;
         for (k, h) in bx.half_extents.to_array().into_iter().enumerate() {
-            let n = r * Vec3::from_array(std::array::from_fn(|i| if i == k { 1.0 } else { 0.0 }));
+            let n = r * unit(k);
             for n in [n, -n] {
                 // how far `a` reaches past the face with outward normal `n`, measured inward
                 let p = m.support_point(a.position(), -n);
                 pen = pen.min(h - (p - o).dot(n));
+            }
+        }
+        // overlap of the two shapes' projections on unit axis `n`
+        let along = |n: Vec3| {
+            let (amax, amin) = (m.support_point(a.position(), n).dot(n), m.support_point(a.position(), -n).dot(n));
+            let (bmax, bmin) = (mb.support_point(b.position(), n).dot(n), mb.support_point(b.position(), -n).dot(n));
+            (amax - bmin).min(bmax - amin)
+        };
+        let ra = a.position().rotation;
+        let edges: Vec<Vec3> = if a.shape().as_cuboid().is_some() {
+            (0..3).map(|k| ra * unit(k)).collect()
+        } else if let Some(c) = a.shape().as_capsule() {
+            vec![ra * (c.segment.b - c.segment.a)]
+        } else if a.shape().as_cylinder().is_some() {
+            vec![ra * Vec3::Y]
+        } else {
+            Vec::new()
+        };
+        let mut axes: Vec<Vec3> = edges.iter().flat_map(|e| (0..3).map(move |k| e.cross(r * unit(k)))).collect();
+        if let Ok(Some(k)) = rapier3d::parry::query::contact(a.position(), a.shape(), b.position(), b.shape(), 0.0) {
+            axes.push(k.normal1);
+        }
+        for n in axes {
+            let l = n.length();
+            if l > 1e-6 && l.is_finite() {
+                pen = pen.min(along(n / l));
             }
         }
         // face axes alone miss edge/vertex separations: GJK's boolean test settles those

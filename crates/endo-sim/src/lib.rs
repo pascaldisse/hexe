@@ -761,10 +761,12 @@ impl Sim {
         let desc = |h: ColliderHandle, c: &Collider| {
             let g = c.collision_groups();
             format!(
-                "{} {:?} {:?} m={:x} f={:x} sg={:x}/{:x} sensor={} hooks={:?}",
+                "{} {:?} {:?} body={:?} mat={:?} m={:x} f={:x} sg={:x}/{:x} sensor={} hooks={:?}",
                 who(h),
                 h.into_raw_parts(),
                 c.shape().shape_type(),
+                c.parent().and_then(|p| self.world.bodies.get(p)).map(|b| b.body_type()),
+                self.self_pairs.mats.of.get(&h).and_then(|&i| self.self_pairs.mats.names.get(i)),
                 g.memberships.bits(),
                 g.filter.bits(),
                 c.solver_groups().memberships.bits(),
@@ -774,7 +776,38 @@ impl Sim {
             )
         };
         let Some(r) = self.rigs.iter().find(|r| r.name == character) else { return Vec::new() };
-        let mut out = Vec::new();
+        let kin = r.handles.iter().flatten().filter_map(|h| self.world.bodies.get(*h)).filter(|b| b.is_kinematic()).count();
+        let mut out = vec![format!("bodies={} kinematic={kin}", r.handles.iter().flatten().count())];
+        // self pairs (`SelfPairs.allowed`) of this rig overlapping now, with the solver's view of each
+        for &(ha, hb) in &self.self_pairs.allowed {
+            let (Some(a), Some(b)) = (self.world.colliders.get(ha), self.world.colliders.get(hb)) else { continue };
+            if self.rigs.get((a.user_data as usize).wrapping_sub(1)).is_none_or(|x| x.name != character) {
+                continue;
+            }
+            let Ok(Some(k)) = rapier3d::parry::query::contact(a.position(), a.shape(), b.position(), b.shape(), 0.0)
+            else {
+                continue;
+            };
+            if k.dist >= 0.0 {
+                continue;
+            }
+            let cp = self.world.narrow_phase.contact_pair(ha, hb);
+            let md = cp
+                .iter()
+                .flat_map(|p| p.manifolds.iter())
+                .flat_map(|m| m.points.iter())
+                .map(|p| p.dist)
+                .fold(f32::INFINITY, f32::min);
+            out.push(format!(
+                "self epa={:.4} manifold={md:.4} soft={:?} | {} | {} | pair={} active={}",
+                k.dist,
+                self.self_pairs.mats.between(ha, hb).map(|i| i.softness),
+                desc(ha, a),
+                desc(hb, b),
+                cp.is_some(),
+                cp.is_some_and(|p| p.has_any_active_contact())
+            ));
+        }
         for b in r.handles.iter().flatten().filter_map(|h| self.world.bodies.get(*h)) {
             for &ha in b.colliders() {
                 let Some(a) = self.world.colliders.get(ha) else { continue };

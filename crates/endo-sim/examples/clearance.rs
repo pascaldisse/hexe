@@ -12,12 +12,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let mode: i32 = a.get(2).and_then(|v| v.parse().ok()).unwrap_or(2);
     let frames: usize = a.get(3).and_then(|v| v.parse().ok()).unwrap_or(300);
-    // h54 A/B knobs: PROPS_FIXED=1 (env props fixed), FORCE_WELDED=0 (pre-h54 force mass), HOLD_SPRINGS=1 (h54 spring holds)
+    // h54 A/B knobs: PROPS_FIXED=1 (env props fixed), FORCE_WELDED=0 (pre-h54 force mass)
     let on = |k: &str, d: bool| std::env::var(k).map(|v| v != "0").unwrap_or(d);
     let opt = SimOptions { behaviours: mode >= 1, forces: mode >= 1, secondary: mode >= 2 };
     let mut sim = Sim::from_scene_props(&s, opt, opt.secondary && !on("PROPS_FIXED", false));
     sim.force_welded = on("FORCE_WELDED", true);
-    sim.hold_springs = on("HOLD_SPRINGS", false);
+    // h56 A/B: HOLD_GAMMA=<erp> / HOLD_EPS=<cfm> (Lock / JoinBodies rows)
+    let num = |k: &str| std::env::var(k).ok().and_then(|v| v.parse::<f32>().ok());
+    if let Some(g) = num("HOLD_GAMMA") {
+        sim.hold_gamma = g;
+    }
+    if let Some(e) = num("HOLD_EPS") {
+        sim.hold_eps = e;
+    }
     // FORCES=1 -> per <ForceEvent> target: accel, masses, impulse N s, measured dv of the body and of its pushed group
     if std::env::var("FORCES").is_ok() {
         let last = sim.force_diag().iter().map(|f| f.1).max().unwrap_or(0);

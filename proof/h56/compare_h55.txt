@@ -1,0 +1,9 @@
+Balcony character01    env   -4->  -4  self    0->  -2
+Balcony character02    env   -1->  -1  self  -13->  -5
+Balcony character03    env   -1->  -1  self   -8->  -0
+Balcony character04    env   -0->  -0  self   -9->  -9
+Car character01        env  -25-> -25  self   -2->  -3
+CarCrash character01   env   -2->  -2  self   -3->  -5
+Gymnast character01    env    0->  -3  self   -2->  -0  <-- >2mm
+Sword FBXImport01      env  -18-> -18  self  -20-> -20
+Sword character01      env   -7->  -6  self    0->  -2

@@ -1,3 +1,12 @@
+# STATUS: h48–h57 (Endorphin fidelity from the exe, main e811e06, 2026-10-23)
+- h48–h52 contacts: 60 Hz contacts (static 120), 8 solver iters, CCD on dynamic bodies; colliders take the scene's Default MaterialInteraction; per-surface-pair materials (friction, restitution, softness as ODE-CFM compliance, maxAdhesiveForce); self-collision per CollisionSurface collidesWithSiblings/Ancestors; env/self penetration probes (`examples/clearance`); FBX-import rigs without limits → free ball joints at handover.
+- h53 props: InertialBody env props dynamic (density × 1000 × volume); Lock/JoinBodies TertiaryBehaviours = per-axis joints over [start,end).
+- h55 ForceEvent = exe one-shot linear Δv (`applyImpulseViaVelocity`) on every Objects body, mass-weighted COM.
+- h56 hold strength = Karma RPRO row force bound (exe 0x4c4e90 → 0x7cde8b); hold frame/topology from the exe (body1 = held body, JoinBodies ref = last listed).
+- h57 Karma hold γ 0.2 / ε 0.01 at h 1/120 read; LockPosition/LockOrientation/LockWithParent parsed. ε stays 1: Karma ε → rapier CFM mapping unread, 0.01 regresses Balcony ch03 env −11 mm (h57c A/B). Noise floor ±1e-6 (h57b/c).
+- Proof: proof/h48–h57d (600 frames); h57d run1 == run2 (Balcony, Car Hit, Car Crash, Gymnast Rings, Sword Play: env/self min penetration ≤ 2.5 cm).
+- OPEN: .nmb networks undecoded (4 of 47 behaviours re-authored); `<Constraint>` attachments not built; Kea ε mapping; visuals not judged by a human.
+---
 # STATUS: h47 (Endorphin scene PLAY path, branch h45/endo-behaviours, 2026-10-21)
 - PLAYS the authored scene, not just a ragdoll: `Sim::from_scene_play` (= `SimOptions{behaviours,forces,secondary}` all on) adds, on top of h46 CatchFall + ForceEvents, the `behave.rs` layer (pose hold servos, ankle balance, Stagger / Arms Windmill / Legs Straighten, catch-fall brace) and the authored event path: `<DesiredPoseEvent>` poses as servo targets, `<AnimationEvent>` clips (clip time = frameOffset + time since the event start, 255 = no offset) kinematic until the `<IncarnationEvent>` FullPhysics frame, then a velocity handover (finite difference over ONE ens frame).
 - Scene timeline: the scene's own `<Animation>` channels drive any character whose first IncarnationEvent is not FullPhysics (imported cars / props / mocap actors) kinematically, so `Car Hit`'s car reaches character01 instead of free-falling; single-body characters now get a controller too.
